@@ -827,7 +827,8 @@ function GeometryTab({ geo, sG, res }) {
     put("shaftDia", ex.shaftDia, 1, ex.statorBore || 1e9);
     if (ex.slotCount >= 3 && ex.slotCount <= 90) { sG("slotNumber", ex.slotCount); applied.push("slotNumber"); }
     if (ex.poleCount >= 2 && ex.poleCount <= 80) { sG("poleNumber", ex.poleCount); applied.push("poleNumber"); }
-    put("airgap", ex.airgap, 0.05, 5);
+    // 에어갭은 자동 적용 안 함: 큰 두 반경의 차(0.5mm)라 DXF 검출오차에 매우 민감 → 토크 왜곡.
+    // 추출값은 참고로만 표시하고 사용자가 실제값(보통 0.5)을 유지/입력하도록 둠.
     sG("statorRot", 0); applied.push("statorRot");          // 정렬했으므로 0
     sG("rotorRot", +(ex.rotorRot - ex.statorRot).toFixed(1)); applied.push("rotorRot");
     setAutoInfo({ ...ex, applied, aligned: true });
@@ -887,7 +888,8 @@ function GeometryTab({ geo, sG, res }) {
             <div className="text-xs rounded p-2 mt-0.5" style={{ background: "#F0F7F1", border: "1px solid #BBD9C0", fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
               <div className="font-bold mb-0.5" style={{ color: "#1B7A2B" }}>추출 결과 (단위 ×{autoInfo.unit})</div>
               <div>OD {autoInfo.statorLamDia} · 보어 {autoInfo.statorBore} · 샤프트 {autoInfo.shaftDia || "—"}</div>
-              <div>슬롯 {autoInfo.slotCount || "?"} · 극 {autoInfo.poleCount || "?"} · 에어갭 {autoInfo.airgap || "?"}</div>
+              <div>슬롯 {autoInfo.slotCount || "?"} · 극 {autoInfo.poleCount || "?"}</div>
+              <div style={{ color: "#B5622D" }}>에어갭(추정) {autoInfo.airgap || "?"} — 미적용, 실제값 직접 입력</div>
               <div>회전 stator {autoInfo.statorRot}° · rotor {autoInfo.rotorRot}°</div>
               <div style={{ color: "#5C6B7A" }}>동심원 Ø: {autoInfo.dias.join(", ") || "없음"}</div>
               <div style={{ color: "#5C6B7A" }}>폴리 외측 {autoInfo.outerN}→슬롯 {autoInfo.slotCount} · 내측 {autoInfo.innerN}→극 {autoInfo.poleCount} · 폴리보어 {autoInfo.borePoly || "—"}</div>
@@ -1696,47 +1698,55 @@ function PhasorPlot({ chains }) {
   );
 }
 
-function EffMap({ speeds, torques, grid, env, op, h = 320 }) {
-  const Wp = 540, P = { l: 52, r: 74, t: 12, b: 26 };
+// jet 컬러맵 (t:0→짙은파랑, 0.5→녹색, 1→짙은적색) — Motor-CAD 효율맵과 동일 계열
+function jetColor(t) {
+  t = Math.max(0, Math.min(1, t));
+  const r = Math.min(Math.max(1.5 - Math.abs(4 * t - 3), 0), 1);
+  const g = Math.min(Math.max(1.5 - Math.abs(4 * t - 2), 0), 1);
+  const b = Math.min(Math.max(1.5 - Math.abs(4 * t - 1), 0), 1);
+  return `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
+}
+function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
+  const Wp = 560, P = { l: 52, r: 82, t: 12, b: 26 };
   const flat = grid.flat().filter((v) => v != null);
   if (!flat.length) return null;
-  let emin = Math.min(...flat), emax = Math.max(...flat);
-  if (emax - emin < 1) { emin -= 1; emax += 1; }
+  const emax = Math.max(...flat);
+  const top = Math.ceil(emax * 2) / 2;                 // 최고효율(0.5 단위 반올림)
+  const NB = 12, span = 22;                            // 상위 22%p에 색 집중 (고효율 구간 분해능)
+  const lo = Math.max(0, top - span);
+  const cellColor = (e) => jetColor((Math.min(e, top) - lo) / (top - lo));   // lo 미만은 t<0 → 짙은 파랑
   const dxs = speeds.length > 1 ? speeds[1] - speeds[0] : 1, dts = torques.length > 1 ? torques[1] - torques[0] : 1;
   const xMax = speeds[speeds.length - 1] + dxs / 2, yMax = torques[torques.length - 1] + dts / 2;
   const sx = (v) => P.l + (v / xMax) * (Wp - P.l - P.r);
   const sy = (v) => h - P.b - (v / yMax) * (h - P.t - P.b);
-  const NB = 8;
-  const bandColor = (e) => {
-    const t = Math.max(0, Math.min(1, (e - emin) / (emax - emin)));
-    const b = Math.round(t * (NB - 1)) / (NB - 1);
-    return `hsl(${(1 - b) * 245},72%,${48 + b * 8}%)`;       // 저효율 파랑 → 고효율 적색
-  };
   const cells = [];
   for (let j = 0; j < torques.length; j++) for (let i = 0; i < speeds.length; i++) {
     const e = grid[j][i]; if (e == null) continue;
     const xl = sx(speeds[i] - dxs / 2), xr = sx(speeds[i] + dxs / 2);
     const yt = sy(torques[j] + dts / 2), yb = sy(torques[j] - dts / 2);
-    cells.push(<rect key={j + "_" + i} x={xl} y={yt} width={Math.max(xr - xl + 0.5, 0.5)} height={Math.max(yb - yt + 0.5, 0.5)} fill={bandColor(e)} shapeRendering="crispEdges" />);
+    cells.push(<rect key={j + "_" + i} x={xl} y={yt} width={Math.max(xr - xl + 0.6, 0.6)} height={Math.max(yb - yt + 0.6, 0.6)} fill={cellColor(e)} shapeRendering="crispEdges" />);
   }
   const envPts = env.x.map((xx, i) => sx(xx) + "," + sy(env.y[i])).join(" ");
+  const cbH = h - P.t - P.b;
   return (
     <div className="rounded w-full" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
       <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
         Efficiency Map <span className="font-normal" style={{ color: "#8893A0" }}>속도-토크 효율 [%] (추정 · 철손 정자속 근사)</span>
       </div>
       <svg width={Wp} height={h} style={{ display: "block" }}>
+        <rect x={P.l} y={P.t} width={Wp - P.l - P.r} height={cbH} fill="#1f2540" />
         {cells}
-        <polyline fill="none" stroke="#1A222C" strokeWidth="1.6" points={envPts} />
-        {op && op.torque <= yMax && <g><circle cx={sx(op.speed)} cy={sy(op.torque)} r="4" fill="#fff" stroke="#111" strokeWidth="1.6" />
-          <text x={sx(op.speed) + 6} y={sy(op.torque) - 5} fontSize="9" fill="#111">정격</text></g>}
+        <polyline fill="none" stroke="#111" strokeWidth="1.8" points={envPts} />
+        {op && op.torque <= yMax && <g><circle cx={sx(op.speed)} cy={sy(op.torque)} r="4.5" fill="#fff" stroke="#111" strokeWidth="1.8" />
+          <text x={sx(op.speed) + 7} y={sy(op.torque) - 5} fontSize="10" fontWeight="bold" fill="#111">정격</text></g>}
         {Array.from({ length: 6 }, (_, i) => { const xv = xMax * i / 5; return <text key={"x" + i} x={sx(xv)} y={h - P.b + 12} fontSize="9" fill="#5C6B7A" textAnchor="middle">{Math.round(xv)}</text>; })}
         {Array.from({ length: 5 }, (_, i) => { const yv = yMax * i / 4; return <text key={"y" + i} x={P.l - 4} y={sy(yv) + 3} fontSize="9" fill="#5C6B7A" textAnchor="end">{yv.toFixed(1)}</text>; })}
         <text x={(P.l + Wp - P.r) / 2} y={h - 2} fontSize="9" fill="#8893A0" textAnchor="middle">Speed [rpm]</text>
         <text x={12} y={h / 2} fontSize="9" fill="#8893A0" textAnchor="middle" transform={`rotate(-90 12 ${h / 2})`}>Torque [Nm]</text>
-        {Array.from({ length: NB }, (_, i) => { const e = emax - (emax - emin) * i / (NB - 1); const yy = P.t + (h - P.t - P.b) * i / NB; return (
-          <g key={"cb" + i}><rect x={Wp - P.r + 16} y={yy} width={14} height={(h - P.t - P.b) / NB} fill={bandColor(e)} />
-            <text x={Wp - P.r + 33} y={yy + 8} fontSize="8" fill="#5C6B7A">{e.toFixed(1)}</text></g>); })}
+        {Array.from({ length: NB }, (_, i) => { const yy = P.t + (cbH * i) / NB; const tBand = 1 - (i + 0.5) / NB; return (
+          <rect key={"cb" + i} x={Wp - P.r + 18} y={yy} width={14} height={cbH / NB + 0.6} fill={jetColor(tBand)} shapeRendering="crispEdges" />); })}
+        {Array.from({ length: NB + 1 }, (_, i) => { const e = top - (span * i) / NB; const yy = P.t + (cbH * i) / NB; return (
+          <text key={"cbt" + i} x={Wp - P.r + 35} y={yy + 3} fontSize="8" fill="#5C6B7A">{i === NB ? "≤" + e.toFixed(0) : e.toFixed(1)}</text>); })}
       </svg>
     </div>
   );
@@ -1828,7 +1838,7 @@ function GraphsTab({ res, calc, solved }) {
     const tnPmax = Math.max(...tnPower);
 
     // ── 효율맵: (속도,토크) 격자에서 최소손실 운전점 효율 (전류원+전압타원 제약, MTPA 근사) ──
-    const NES = 64, NET = 44;
+    const NES = 88, NET = 60;
     const effSpeeds = Array.from({ length: NES }, (_, i) => (nTop * (i + 0.5)) / NES);
     const effTorques = Array.from({ length: NET }, (_, j) => (T0 * (j + 0.5)) / NET);
     const feRatio = (n) => (pp * n / 60) / Math.max(res.fe, 1e-6);
