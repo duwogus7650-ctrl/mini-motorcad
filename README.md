@@ -36,7 +36,7 @@ npm run dev
 | Materials | 컴포넌트별 재질 그리드(강판/자석 드롭다운), 중량 계산, 철손계수 편집 |
 | Calculation | Drive 패널(전류정의 Peak/RMS, Star/Delta, 위상각, 온도), 해석모델 보정계수 |
 | Output Data | 하위탭 Drive/E-Magnetics/Flux/Losses/Winding/Materials, Motor-CAD FEA 참조값 비교열 |
-| Graphs | BEMF/토크리플/전류 파형(고조파 합성 추정), 권선 MMF 스텝+공간고조파, 코일 EMF 페이저 체인, **토크-속도/출력-속도 곡선**(전류원+전압타원 제약 약계자 포락선) |
+| Graphs | BEMF/토크리플/전류 파형(고조파 합성 추정), 권선 MMF 스텝+공간고조파, 코일 EMF 페이저 체인, **토크-속도/출력-속도 곡선**(전류원+전압타원 제약 약계자 포락선), **효율맵**(속도-토크 평면 최소손실 효율 등고선) |
 
 ## 해석 엔진 검증 (1250W-jk Motor-CAD FEA 대비)
 

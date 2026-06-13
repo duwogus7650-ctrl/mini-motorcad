@@ -1696,6 +1696,52 @@ function PhasorPlot({ chains }) {
   );
 }
 
+function EffMap({ speeds, torques, grid, env, op, h = 320 }) {
+  const Wp = 540, P = { l: 52, r: 74, t: 12, b: 26 };
+  const flat = grid.flat().filter((v) => v != null);
+  if (!flat.length) return null;
+  let emin = Math.min(...flat), emax = Math.max(...flat);
+  if (emax - emin < 1) { emin -= 1; emax += 1; }
+  const dxs = speeds.length > 1 ? speeds[1] - speeds[0] : 1, dts = torques.length > 1 ? torques[1] - torques[0] : 1;
+  const xMax = speeds[speeds.length - 1] + dxs / 2, yMax = torques[torques.length - 1] + dts / 2;
+  const sx = (v) => P.l + (v / xMax) * (Wp - P.l - P.r);
+  const sy = (v) => h - P.b - (v / yMax) * (h - P.t - P.b);
+  const NB = 8;
+  const bandColor = (e) => {
+    const t = Math.max(0, Math.min(1, (e - emin) / (emax - emin)));
+    const b = Math.round(t * (NB - 1)) / (NB - 1);
+    return `hsl(${(1 - b) * 245},72%,${48 + b * 8}%)`;       // 저효율 파랑 → 고효율 적색
+  };
+  const cells = [];
+  for (let j = 0; j < torques.length; j++) for (let i = 0; i < speeds.length; i++) {
+    const e = grid[j][i]; if (e == null) continue;
+    const xl = sx(speeds[i] - dxs / 2), xr = sx(speeds[i] + dxs / 2);
+    const yt = sy(torques[j] + dts / 2), yb = sy(torques[j] - dts / 2);
+    cells.push(<rect key={j + "_" + i} x={xl} y={yt} width={Math.max(xr - xl + 0.5, 0.5)} height={Math.max(yb - yt + 0.5, 0.5)} fill={bandColor(e)} shapeRendering="crispEdges" />);
+  }
+  const envPts = env.x.map((xx, i) => sx(xx) + "," + sy(env.y[i])).join(" ");
+  return (
+    <div className="rounded w-full" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
+      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
+        Efficiency Map <span className="font-normal" style={{ color: "#8893A0" }}>속도-토크 효율 [%] (추정 · 철손 정자속 근사)</span>
+      </div>
+      <svg width={Wp} height={h} style={{ display: "block" }}>
+        {cells}
+        <polyline fill="none" stroke="#1A222C" strokeWidth="1.6" points={envPts} />
+        {op && op.torque <= yMax && <g><circle cx={sx(op.speed)} cy={sy(op.torque)} r="4" fill="#fff" stroke="#111" strokeWidth="1.6" />
+          <text x={sx(op.speed) + 6} y={sy(op.torque) - 5} fontSize="9" fill="#111">정격</text></g>}
+        {Array.from({ length: 6 }, (_, i) => { const xv = xMax * i / 5; return <text key={"x" + i} x={sx(xv)} y={h - P.b + 12} fontSize="9" fill="#5C6B7A" textAnchor="middle">{Math.round(xv)}</text>; })}
+        {Array.from({ length: 5 }, (_, i) => { const yv = yMax * i / 4; return <text key={"y" + i} x={P.l - 4} y={sy(yv) + 3} fontSize="9" fill="#5C6B7A" textAnchor="end">{yv.toFixed(1)}</text>; })}
+        <text x={(P.l + Wp - P.r) / 2} y={h - 2} fontSize="9" fill="#8893A0" textAnchor="middle">Speed [rpm]</text>
+        <text x={12} y={h / 2} fontSize="9" fill="#8893A0" textAnchor="middle" transform={`rotate(-90 12 ${h / 2})`}>Torque [Nm]</text>
+        {Array.from({ length: NB }, (_, i) => { const e = emax - (emax - emin) * i / (NB - 1); const yy = P.t + (h - P.t - P.b) * i / NB; return (
+          <g key={"cb" + i}><rect x={Wp - P.r + 16} y={yy} width={14} height={(h - P.t - P.b) / NB} fill={bandColor(e)} />
+            <text x={Wp - P.r + 33} y={yy + 8} fontSize="8" fill="#5C6B7A">{e.toFixed(1)}</text></g>); })}
+      </svg>
+    </div>
+  );
+}
+
 function GraphsTab({ res, calc, solved }) {
   const data = useMemo(() => {
     if (!res) return null;
@@ -1780,8 +1826,36 @@ function GraphsTab({ res, calc, solved }) {
     let baseSpeed = nTop;
     for (let i = 1; i < NTN; i++) { if (tnTorque[i] < 0.98 * T0) { baseSpeed = tnSpeed[i]; break; } }
     const tnPmax = Math.max(...tnPower);
+
+    // ── 효율맵: (속도,토크) 격자에서 최소손실 운전점 효율 (전류원+전압타원 제약, MTPA 근사) ──
+    const NES = 64, NET = 44;
+    const effSpeeds = Array.from({ length: NES }, (_, i) => (nTop * (i + 0.5)) / NES);
+    const effTorques = Array.from({ length: NET }, (_, j) => (T0 * (j + 0.5)) / NET);
+    const feRatio = (n) => (pp * n / 60) / Math.max(res.fe, 1e-6);
+    const effGrid = effTorques.map((Tt) => effSpeeds.map((n) => {
+      const wm = (n * 2 * Math.PI) / 60, we = pp * wm;
+      let bestPcu = Infinity, bestEff = null;
+      for (let k = 0; k <= 80; k++) {
+        const id = -Imax * (k / 80);
+        const denom = lamF + (LdF - LqF) * id;
+        if (Math.abs(denom) < 1e-9) continue;
+        const iq = Tt / (1.5 * pp * denom);
+        if (iq < 0 || id * id + iq * iq > Imax * Imax) continue;        // 전류 한계
+        const Vd = Rf * id - we * LqF * iq, Vq = Rf * iq + we * (LdF * id + lamF);
+        if (Vd * Vd + Vq * Vq > Vmax * Vmax) continue;                  // 전압 한계
+        const Pcu = 1.5 * Rf * (id * id + iq * iq);
+        if (Pcu < bestPcu) {
+          bestPcu = Pcu;
+          const fr = feRatio(n), Pfe = res.PfeHyst * fr + res.PfeEddy * fr * fr;
+          const Pem = Tt * wm, Pout = Pem - Pfe - calc.otherLoss, Pin = Pem + Pcu;
+          bestEff = Pout > 0 && Pin > 0 ? (Pout / Pin) * 100 : null;
+        }
+      }
+      return bestEff;
+    }));
     return { deg, eW, iW, tq, tAvg, ripple, slotX, m1, mTot, mag, chains,
-      tnSpeed, tnTorque, tnPower, baseSpeed, tnPmax, opSpeed: calc.speed, opTorque: res.torque };
+      tnSpeed, tnTorque, tnPower, baseSpeed, tnPmax, opSpeed: calc.speed, opTorque: res.torque,
+      effSpeeds, effTorques, effGrid };
   }, [res, calc]);
   if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하면 파형이 표시됩니다.</div>;
   if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
@@ -1818,6 +1892,8 @@ function GraphsTab({ res, calc, solved }) {
           { x: data.tnSpeed, y: data.tnPower, color: "#1B7A2B", label: "Output Power [W]" },
           { x: [data.opSpeed, data.opSpeed], y: [0, data.opTorque * data.opSpeed * 2 * Math.PI / 60], color: "#D98E04", label: "정격점" },
         ]} />
+      <EffMap speeds={data.effSpeeds} torques={data.effTorques} grid={data.effGrid}
+        env={{ x: data.tnSpeed, y: data.tnTorque }} op={{ speed: data.opSpeed, torque: data.opTorque }} />
       <div className="w-full text-xs" style={{ color: "#8893A0" }}>
         모든 파형은 해석식 합성 추정치 — 슬롯팅·포화·코깅 미반영. 정밀 파형은 Motor-CAD/Maxwell FEA로 검증.
       </div>
