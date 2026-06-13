@@ -144,7 +144,22 @@ function extractGeometry(shapes) {
       rout: Math.max(...pts.map((p) => R(p[0], p[1]))) * unit, ang: Math.atan2(gy - cy, gx - cx) / D2R };
   }).filter((p) => p.rc > 0.02 * maxR * unit);       // 중심부 잡음 제외
   // 무게중심반경 최대 갭으로 슬롯(외)·자석(내) 분리
-  let slotCount = 0, poleCount = 0, statorBore = 0, rotorOD = 0, airgap = 0, statorRot = 0, rotorRot = 0;
+  // 각도 클러스터 수: 정렬한 각도 간격을 내림차순 정렬해 '큰 간격→작은 간격' 비율 점프로
+  // 클러스터 경계 개수를 센다 (슬롯당 폴리 2개여도 한 슬롯으로 병합, 균등배치면 전부 개별).
+  const countClusters = (angs) => {
+    const n = angs.length;
+    if (n <= 2) return n;
+    const s = angs.slice().sort((a, b) => a - b), gaps = [];
+    for (let i = 0; i < n; i++) gaps.push(i + 1 < n ? s[i + 1] - s[i] : s[0] + 360 - s[i]);
+    const desc = gaps.slice().sort((a, b) => b - a);
+    let bestR = 1, cut = -1;
+    for (let i = 0; i < desc.length - 1; i++) { if (desc[i + 1] < 1e-6) continue; const r = desc[i] / desc[i + 1]; if (r > bestR) { bestR = r; cut = i; } }
+    return bestR > 1.4 && cut + 1 >= 2 ? cut + 1 : n;
+  };
+  const wrap = (a, p) => a - p * Math.round(a / p);
+  const meanRot = (arr, p) => arr.reduce((s, a) => s + wrap(a, p), 0) / arr.length;
+  let slotCount = 0, poleCount = 0, rotorOD = 0, airgap = 0, statorRot = 0, rotorRot = 0;
+  let borePoly = 0, outerN = 0, innerN = 0;
   if (polyInfo.length) {
     const rcs = polyInfo.map((p) => p.rc).sort((a, b) => a - b);
     let gi = -1, gv = 0;
@@ -152,23 +167,31 @@ function extractGeometry(shapes) {
     const thr = gi > 0 && gv > 0.8 ? (rcs[gi - 1] + rcs[gi]) / 2 : -Infinity;
     const outer = polyInfo.filter((p) => p.rc >= thr);   // 슬롯
     const inner = polyInfo.filter((p) => p.rc < thr);    // 자석
-    const wrap = (a, p) => a - p * Math.round(a / p);
+    outerN = outer.length; innerN = inner.length;
     if (outer.length) {
-      slotCount = outer.length; statorBore = 2 * Math.min(...outer.map((p) => p.rin));
-      const sp = 360 / slotCount; statorRot = wrap(outer[0].ang, sp);
+      slotCount = countClusters(outer.map((p) => p.ang));
+      borePoly = 2 * Math.min(...outer.map((p) => p.rin));
+      statorRot = meanRot(outer.map((p) => p.ang), 360 / slotCount);
     }
     if (inner.length) {
-      poleCount = inner.length; rotorOD = 2 * Math.max(...inner.map((p) => p.rout));
-      const pp = 360 / poleCount; rotorRot = wrap(inner[0].ang, pp);
+      poleCount = countClusters(inner.map((p) => p.ang));
+      rotorOD = 2 * Math.max(...inner.map((p) => p.rout));
+      rotorRot = meanRot(inner.map((p) => p.ang), 360 / poleCount);
     }
-    if (statorBore && rotorOD) airgap = (statorBore - rotorOD) / 2;
   }
-  const statorLamDia = +(2 * maxR * unit).toFixed(2);
-  if (!statorBore && dias.length >= 2) statorBore = dias[1];   // 폴리 미검출 시 동심원 차선
-  const shaftDia = dias.length ? dias[dias.length - 1] : 0;
+  // 지름 배정: OD(최대) / 보어(동심원 우선) / 샤프트(보어의 0.7배 미만 소형원)
+  const statorLamDia = dias.length ? +Math.max(dias[0], 2 * maxR * unit).toFixed(2) : +(2 * maxR * unit).toFixed(2);
+  const innerDias = dias.filter((d) => d < 0.985 * statorLamDia);
+  let statorBore = 0;
+  if (borePoly) { const near = innerDias.find((d) => Math.abs(d - borePoly) < 0.15 * borePoly); statorBore = near || borePoly; }
+  else if (innerDias.length) statorBore = innerDias[0];
+  let shaftDia = 0;
+  if (statorBore) { const sc = innerDias.filter((d) => d < 0.92 * statorBore); if (sc.length) shaftDia = sc[sc.length - 1]; }
+  if (statorBore && rotorOD) airgap = (statorBore - rotorOD) / 2;
   return { cx, cy, unit, dias, statorLamDia, statorBore: +statorBore.toFixed(2),
     shaftDia: +shaftDia.toFixed(2), slotCount, poleCount, rotorOD: +rotorOD.toFixed(2),
-    airgap: +airgap.toFixed(2), statorRot: +statorRot.toFixed(1), rotorRot: +rotorRot.toFixed(1) };
+    airgap: +airgap.toFixed(2), statorRot: +statorRot.toFixed(1), rotorRot: +rotorRot.toFixed(1),
+    outerN, innerN, borePoly: +borePoly.toFixed(2) };
 }
 
 // ─── 형상 생성 ───────────────────────────────────────────────────
@@ -827,10 +850,11 @@ function GeometryTab({ geo, sG, res }) {
           {autoInfo && (
             <div className="text-xs rounded p-2 mt-0.5" style={{ background: "#F0F7F1", border: "1px solid #BBD9C0", fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
               <div className="font-bold mb-0.5" style={{ color: "#1B7A2B" }}>추출 결과 (단위 ×{autoInfo.unit})</div>
-              <div>OD {autoInfo.statorLamDia} · 보어 {autoInfo.statorBore} · 샤프트 {autoInfo.shaftDia}</div>
+              <div>OD {autoInfo.statorLamDia} · 보어 {autoInfo.statorBore} · 샤프트 {autoInfo.shaftDia || "—"}</div>
               <div>슬롯 {autoInfo.slotCount || "?"} · 극 {autoInfo.poleCount || "?"} · 에어갭 {autoInfo.airgap || "?"}</div>
               <div>회전 stator {autoInfo.statorRot}° · rotor {autoInfo.rotorRot}°</div>
               <div style={{ color: "#5C6B7A" }}>동심원 Ø: {autoInfo.dias.join(", ") || "없음"}</div>
+              <div style={{ color: "#5C6B7A" }}>폴리 외측 {autoInfo.outerN}→슬롯 {autoInfo.slotCount} · 내측 {autoInfo.innerN}→극 {autoInfo.poleCount} · 폴리보어 {autoInfo.borePoly || "—"}</div>
               <div style={{ color: "#8893A0", marginTop: 2 }}>적용 {autoInfo.applied.length}개 — 오버레이 확인 후 미세조정</div>
             </div>
           )}
