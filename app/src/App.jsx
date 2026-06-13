@@ -1580,7 +1580,42 @@ function GraphsTab({ res, calc, solved }) {
       });
       return pts;
     });
-    return { deg, eW, iW, tq, tAvg, ripple, slotX, m1, mTot, mag, chains };
+    // ── Torque–Speed (T-N) 용량곡선: 전류원(I_max) + 전압타원(V_max) 제약 하 최대토크 ──
+    const pp = Math.max(1, Math.round(res.Ke / res.lambda));
+    const lamF = res.lambda, Rf = res.Rphase;
+    const LdF = res.Ld * 1e-3, LqF = res.Lq * 1e-3;          // mH → H
+    const Vmax = (res.noLoadSpeed * 2 * Math.PI * res.Ke) / 60; // 가용 상전압(피크) = Vdc 기반
+    const Imax = res.IphRms * Math.SQRT2;                       // 동작 상전류(피크) = 전류원 한계
+    const nTop = res.noLoadSpeed * 1.15, NTN = 90, Nid = 121;
+    const maxTorqueAt = (n) => {
+      const wm = (n * 2 * Math.PI) / 60, we = pp * wm;
+      let best = 0;
+      for (let k = 0; k < Nid; k++) {
+        const id = -Imax * (k / (Nid - 1));                   // 0 → -Imax (약계자)
+        const iqCur = Math.sqrt(Math.max(Imax * Imax - id * id, 0)); // 전류원 한계
+        // 전압타원: (R·id − we·Lq·iq)² + (R·iq + we·(Ld·id+λ))² = Vmax² → iq 2차식
+        const a = (we * LqF) ** 2 + Rf * Rf;
+        const b = 2 * Rf * we * ((LdF - LqF) * id + lamF);
+        const c = (Rf * id) ** 2 + (we * (LdF * id + lamF)) ** 2 - Vmax * Vmax;
+        let iqVolt = Infinity;
+        if (a > 1e-12) { const disc = b * b - 4 * a * c; iqVolt = disc < 0 ? 0 : Math.max(0, (-b + Math.sqrt(disc)) / (2 * a)); }
+        const iq = Math.max(0, Math.min(iqCur, iqVolt));
+        const T = 1.5 * pp * (lamF * iq + (LdF - LqF) * id * iq);
+        if (T > best) best = T;
+      }
+      return best;
+    };
+    const tnSpeed = [], tnTorque = [], tnPower = [];
+    for (let i = 0; i < NTN; i++) {
+      const n = (nTop * i) / (NTN - 1), T = maxTorqueAt(n);
+      tnSpeed.push(n); tnTorque.push(T); tnPower.push((T * n * 2 * Math.PI) / 60);
+    }
+    const T0 = tnTorque[0];
+    let baseSpeed = nTop;
+    for (let i = 1; i < NTN; i++) { if (tnTorque[i] < 0.98 * T0) { baseSpeed = tnSpeed[i]; break; } }
+    const tnPmax = Math.max(...tnPower);
+    return { deg, eW, iW, tq, tAvg, ripple, slotX, m1, mTot, mag, chains,
+      tnSpeed, tnTorque, tnPower, baseSpeed, tnPmax, opSpeed: calc.speed, opTorque: res.torque };
   }, [res, calc]);
   if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하면 파형이 표시됩니다.</div>;
   if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
@@ -1607,6 +1642,16 @@ function GraphsTab({ res, calc, solved }) {
         ]} />
       <Bars title="MMF Harmonics" sub="공간(기계) 고조파 [At] — 극쌍수에서 피크" values={data.mag} />
       <PhasorPlot chains={data.chains} />
+      <Plot title="Torque–Speed Curve" sub={"기저속도 ~" + Math.round(data.baseSpeed) + " rpm · 전류원 한계 = 동작 전류"}
+        series={[
+          { x: data.tnSpeed, y: data.tnTorque, color: "#2244CC", label: "Max Torque [Nm]" },
+          { x: [data.opSpeed, data.opSpeed], y: [0, data.opTorque], color: "#D98E04", label: "정격점" },
+        ]} />
+      <Plot title="Power–Speed Curve" sub={"최대 출력 " + Math.round(data.tnPmax) + " W · 전압한계 = 무부하속도 " + Math.round(res.noLoadSpeed) + " rpm"}
+        series={[
+          { x: data.tnSpeed, y: data.tnPower, color: "#1B7A2B", label: "Output Power [W]" },
+          { x: [data.opSpeed, data.opSpeed], y: [0, data.opTorque * data.opSpeed * 2 * Math.PI / 60], color: "#D98E04", label: "정격점" },
+        ]} />
       <div className="w-full text-xs" style={{ color: "#8893A0" }}>
         모든 파형은 해석식 합성 추정치 — 슬롯팅·포화·코깅 미반영. 정밀 파형은 Motor-CAD/Maxwell FEA로 검증.
       </div>
