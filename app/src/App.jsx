@@ -2009,14 +2009,13 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
       return { Tw, Tc, Th, Q, Pcu };
     };
     const op = solve(res.Pfe, calc.otherLoss, res.RacRdc || 1);
-    const nMax = res.noLoadSpeed * 1.6, NPT = 60, kacR = (res.RacRdc || 1) - 1, nR = Math.max(calc.speed, 1);
-    const spd = [], temp = [];
-    for (let i = 0; i <= NPT; i++) {
-      const n = (nMax * i) / NPT, fr = n / nR;
-      const Pfe_n = res.PfeHyst * fr + res.PfeEddy * Math.pow(fr, 1.8), other_n = calc.otherLoss * fr;
-      spd.push(n); temp.push(solve(Pfe_n, other_n, 1 + kacR * fr * fr).Tw);
-    }
-    return { op, Rslot, Ryoke, Rconv, Ahouse, Aint, Dh: Dh * 1e3, Lh: Lh * 1e3, spd, temp, Tsat: temp[temp.length - 1] };
+    // 온도-시간 포화곡선: 열용량 C·열시정수 τ로 1차 지수상승 → 정상상태(포화온도)로 수렴
+    const Cth = res.mCopper * 385 + res.mStator * 460;     // J/K (동선 cp≈385 + 스테이터 철심 cp≈460)
+    const tau = Cth * (Ryoke + Rconv);                     // s, 지배 열시정수
+    const Tss = op.Tw, NPT = 60, tMax = tau * 5;
+    const tmin = [], temp = [];
+    for (let i = 0; i <= NPT; i++) { const t = (tMax * i) / NPT; tmin.push(t / 60); temp.push(therm.ambient + (Tss - therm.ambient) * (1 - Math.exp(-t / tau))); }
+    return { op, Rslot, Ryoke, Rconv, Ahouse, Aint, Dh: Dh * 1e3, Lh: Lh * 1e3, Cth, tau, Tss, tmin, temp };
   }, [geo, wind, calc, res, therm]);
   if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 누른 뒤 표시됩니다 (손실값 필요).</div>;
   if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
@@ -2063,17 +2062,20 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
           <Row k="철심→하우징 R_yoke" v={data.Ryoke.toFixed(3)} u="K/W" />
           <Row k="하우징→공기 R_conv" v={data.Rconv.toFixed(3)} u="K/W" />
           <Row k="하우징 외표면" v={(data.Ahouse * 1e4).toFixed(0)} u="cm²" />
+          <Row k="하우징(사용)" v={data.Dh.toFixed(0) + "×" + data.Lh.toFixed(0)} u="mm" />
+          <Row k="열용량 C" v={data.Cth.toFixed(0)} u="J/K" />
+          <Row k="열 시정수 τ" v={(data.tau / 60).toFixed(1)} u="분" />
         </div>
         {data.op.Tw > 130 && <div className="text-xs mt-1 px-1" style={{ color: "#B02020" }}>⚠ 권선온도 과다 — 이 냉각방식으론 연속정격 불가. 강제공냉/전도방열 또는 하우징 확대 필요.</div>}
         {Math.abs(data.op.Tw - calc.Tcu) > 8 && <div className="text-xs mt-1 px-1" style={{ color: "#B5622D" }}>예측 권선온도 {data.op.Tw.toFixed(0)}°C ≠ 입력 {calc.Tcu}°C. 정밀화하려면 Calculation의 Armature Winding Temp를 {data.op.Tw.toFixed(0)}로 맞추고 재Solve.</div>}
       </div>
       <div className="flex-1 min-w-0">
-        <Plot title="포화온도–속도 곡선" sub={"정격전류 연속운전 · 포화온도(@" + Math.round(data.spd[data.spd.length - 1]) + "rpm) " + data.Tsat.toFixed(1) + "°C"}
+        <Plot title="포화온도 예측 (온도–시간)" sub={"정상상태 " + data.Tss.toFixed(1) + "°C · 시정수 τ " + (data.tau / 60).toFixed(1) + "분 · ≈" + (5 * data.tau / 60).toFixed(0) + "분 후 포화"}
           h={300} series={[
-            { x: data.spd, y: data.temp, color: "#B02020", label: "Coil Temp [°C]" },
-            { x: [calc.speed, calc.speed], y: [therm.ambient, data.op.Tw], color: "#D98E04", label: "정격속도" },
+            { x: data.tmin, y: data.temp, color: "#B02020", label: "Coil Temp [°C] vs 분" },
+            { x: [0, data.tmin[data.tmin.length - 1]], y: [data.Tss, data.Tss], color: "#8893A0", label: "포화온도" },
           ]} />
-        <div className="text-xs mt-1 px-1" style={{ color: "#8893A0" }}>속도별 정상상태 권선온도 (손실 속도외삽 + 열-전기 반복). Motor-CAD 포화온도 예측곡선 대응 (추정).</div>
+        <div className="text-xs mt-1 px-1" style={{ color: "#8893A0" }}>고정 운전점에서 권선이 가열되며 정상상태(포화온도)로 수렴. τ = 열용량×열저항. Motor-CAD 포화온도 예측곡선 대응(추정).</div>
       </div>
     </div>
   );
