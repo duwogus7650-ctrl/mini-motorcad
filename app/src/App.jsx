@@ -209,7 +209,7 @@ function windingAnalysis(Ns, poles, throw_, Nc) {
     return n ? Math.hypot(re, im) / (2 * n) : 0;
   };
   const coilsPerPhase = coils.filter((c) => c.phase === 0).length;
-  return { coils, table, kw, coilsPerPhase };
+  return { coils, table, kw, coilsPerPhase, theta };
 }
 
 // ─── 재질 DB ─────────────────────────────────────────────────────
@@ -223,6 +223,27 @@ const MAGNETS = {
   "N42SH": { Br20: 1.30, tc: -0.115, mur: 1.05, density: 7500 },
   "N52":   { Br20: 1.43, tc: -0.12, mur: 1.05, density: 7500 },
   "N35":   { Br20: 1.18, tc: -0.12, mur: 1.05, density: 7400 },
+};
+
+// ─── 와이어 게이지 테이블 (cu=나동선, cov=피복 외경 [mm]) ────────
+const WIRE_TABLES = {
+  Metric: [ // IEC 60317 Grade 2
+    [0.200, 0.239], [0.224, 0.266], [0.250, 0.297], [0.280, 0.329], [0.315, 0.367],
+    [0.355, 0.411], [0.400, 0.459], [0.450, 0.513], [0.500, 0.569], [0.560, 0.632],
+    [0.630, 0.706], [0.710, 0.790], [0.800, 0.885], [0.900, 0.990], [1.000, 1.093],
+    [1.120, 1.217], [1.250, 1.349], [1.400, 1.502], [1.600, 1.706], [1.800, 1.910], [2.000, 2.116],
+  ].map(([cu, cov]) => ({ label: `Ø${cu.toFixed(3)}`, cu, cov })),
+  AWG: [ // NEMA MW1000 Heavy Build
+    [14, 1.628, 1.732], [16, 1.291, 1.384], [18, 1.024, 1.110], [20, 0.812, 0.892],
+    [22, 0.644, 0.714], [24, 0.511, 0.577], [26, 0.405, 0.462], [28, 0.320, 0.373],
+    [30, 0.254, 0.302], [32, 0.202, 0.241], [34, 0.160, 0.198], [36, 0.127, 0.161], [38, 0.101, 0.130],
+  ].map(([g, cu, cov]) => ({ label: `AWG ${g}`, cu, cov })),
+  SWG: [ // BS 3737, Grade 2 상당 피복 (근사)
+    [14, 2.032, 2.149], [16, 1.626, 1.732], [18, 1.219, 1.318], [20, 0.914, 1.006],
+    [22, 0.711, 0.794], [24, 0.559, 0.632], [26, 0.457, 0.521], [28, 0.376, 0.434],
+    [30, 0.315, 0.367], [32, 0.274, 0.321], [34, 0.234, 0.277], [36, 0.193, 0.231],
+    [38, 0.152, 0.187], [40, 0.122, 0.152],
+  ].map(([g, cu, cov]) => ({ label: `SWG ${g}`, cu, cov })),
 };
 
 // ─── 해석 엔진 (검증: 1250W-jk) ─────────────────────────────────
@@ -255,7 +276,7 @@ function compute(G, W, M, C) {
   const alpha = G.magnetArcED / 180;
   const L = G.magneticLength * 1e-3;
   const lam = (2 / Math.PI) * kw1 * NphSeries * (alpha * Bgpk * C.klk) * (taup * 1e-3) * L;
-  out.lambda = lam;
+  out.lambda = lam; out.magnetAlpha = alpha;
   const fe = C.speed / 60 * pp;
   out.fe = fe;
   out.Epk = 2 * Math.PI * fe * lam;
@@ -270,7 +291,8 @@ function compute(G, W, M, C) {
   out.KtLine = out.torque / (C.IlineRms * Math.SQRT2);
 
   // 슬롯/충전율
-  const slotA = shoelace(buildSlotPath(G));
+  const slotPath = buildSlotPath(G);
+  const slotA = shoelace(slotPath);
   out.slotArea = slotA;
   const wireA = Math.PI / 4 * W.wireDia ** 2;
   const cuA = Math.PI / 4 * W.copperDia ** 2;
@@ -289,6 +311,33 @@ function compute(G, W, M, C) {
   out.RlineLine = W.connection === "delta" ? (2 / 3) * out.Rphase : 2 * out.Rphase;
   out.Pcu = 3 * Iph ** 2 * out.Rphase;
   out.Jrms = Iph / W.parallelPaths / out.turnCSA;
+
+  // 권선영역 상세 (Motor-CAD Winding 출력 대응, 기하 근사)
+  const RbW = Bore / 2, RdW = RbW + G.slotDepth;
+  const wedgeHold = W.wedgeModel === "wound" ? 0 : W.wedgeDepth; // Wound Space: 웨지 공간도 권선 가능
+  const xWedgeEnd = Math.sqrt(Math.max(RbW * RbW - (G.slotOpening / 2) ** 2, 0)) + G.toothTipDepth + wedgeHold;
+  let linedLen = 0; // 라이너가 깔리는 둘레: 치선단 코너(A3)부터 반대쪽 A3까지
+  for (let i = 2; i < slotPath.length - 3; i++)
+    linedLen += Math.hypot(slotPath[i + 1][0] - slotPath[i][0], slotPath[i + 1][1] - slotPath[i][1]);
+  out.linerArea = linedLen * W.linerThk;
+  out.wedgeArea = W.wedgeModel === "wedge" ? (G.slotOpening + 1.25) * W.wedgeDepth : 0; // 사다리꼴 평균폭 (뷰어 형상과 동일)
+  out.windingDepth = RdW - xWedgeEnd;
+  out.dividerArea = W.coilDivider * out.windingDepth;
+  out.windingAreaLiner = slotA - out.wedgeArea - out.dividerArea;
+  out.windingArea = out.windingAreaLiner - out.linerArea;
+  out.coveredWireArea = out.condPerSlot * wireA;
+  out.copperArea = out.condPerSlot * cuA;
+  out.impregArea = out.windingArea - out.coveredWireArea;
+  out.wireFillWdg = out.coveredWireArea / out.windingArea;
+  out.heavyBuildFill = out.condPerSlot * W.wireDia ** 2 / out.windingArea;
+  out.ewdgMLT = out.MLT - 2 * G.stackLength;
+
+  // 동선 체적 / 엔드와인딩 충전율 (근사: 권선환형 × 반타원 오버행)
+  out.volCuActive = out.turnCSA * 2 * G.stackLength * NphTotal * 3;      // mm³
+  out.volCuEwdg = out.turnCSA * out.ewdgMLT * NphTotal * 3 / 2;          // mm³ (편측)
+  const RdLw = RdW - W.linerThk, xWin = xWedgeEnd + W.linerThk;
+  const ewdgRegion = Math.PI * (RdLw ** 2 - xWin ** 2) * (Math.PI * out.coilPitch / 4);
+  out.ewdgFill = ewdgRegion > 0 ? out.volCuEwdg * (W.wireDia / W.copperDia) ** 2 / ewdgRegion : 0;
 
   // 자속밀도 (FSCW 보정)
   out.Bt = C.cT * Bgpk * taus / G.toothWidth;
@@ -371,7 +420,7 @@ const GEO0 = {
 const WIND0 = {
   turnsPerCoil: 12, throw: 1, parallelPaths: 1, wireDia: 0.5, copperDia: 0.45,
   strands: 17, connection: "delta", linerThk: 0.5, coilDivider: 0.5,
-  wedgeDepth: 1.0, condSep: 0.02,
+  wedgeDepth: 1.0, condSep: 0.02, wedgeModel: "wedge",
 };
 const MAT0 = { steel: "20PNX1200F", magnet: "N45UH", Br20: 1.32, tcBr: -0.12, mur: 1.05, kh: 0.0226, ke: 4.43e-5 };
 const CALC0 = { speed: 3200, Vdc: 48, IlineRms: 24.8, phaseAdv: 0, Tcu: 80, Tmag: 80, klk: 0.97, cT: 0.56, cL: 2.6, cLs: 0.33, otherLoss: 6.7, currentDef: "rms", magnetisation: "parallel", driveMode: "sine" };
@@ -381,6 +430,10 @@ const REF = {
   kw1: 0.94521, turnsPerPhase: 72, condPerSlot: 408, slotArea: 160.3, cuSlotFill: 0.4049,
   wireSlotFill: 0.4999, coilPitch: 10.5, MLT: 92.99, Rphase: 0.05258, Pcu: 32.34, Jrms: 5.296,
   lambda: 0.0157, Epk: 42.09, Ke: 0.1256, torque: 3.7965, Bt: 1.808, By: 1.414, Bgpk: 1.174,
+  windingArea: 132.5, windingAreaLiner: 152.2, coveredWireArea: 80.11, copperArea: 64.89,
+  impregArea: 52.36, wedgeArea: 1.627, linerArea: 19.73, dividerArea: 6.441, windingDepth: 12.882,
+  wireFillWdg: 0.6047, heavyBuildFill: 0.77, ewdgMLT: 32.99,
+  volCuActive: 35040, volCuEwdg: 9633, ewdgFill: 0.3794,
   Pfe: 23.91, eff: 95.213, Pout: 1244.4, noLoadSpeed: 3649, mStator: 0.498, mRotor: 0.2116,
   mMagnet: 0.1428, mCopper: 0.4851, Ld: 0.1289, Lq: 0.1401, Kt_phase: 0.265, stallTorque: 147.8,
 };
@@ -418,9 +471,17 @@ export default function MiniMotorCad() {
   const [calc, setCalc] = useState(CALC0);
   const [showRef, setShowRef] = useState(true);
 
-  const res = useMemo(() => {
-    try { return compute(geo, wind, mat, calc); } catch (e) { return null; }
+  // 입력 도중(빈 칸→0 등) NaN/Infinity가 나오면 마지막 유효 결과를 유지
+  const rawRes = useMemo(() => {
+    try {
+      const r = compute(geo, wind, mat, calc);
+      return ["torque", "Rphase", "slotArea", "eff", "kw1"].every((k) => isFinite(r[k])) ? r : null;
+    } catch (e) { return null; }
   }, [geo, wind, mat, calc]);
+  const lastResRef = useRef(null);
+  if (rawRes) lastResRef.current = rawRes;
+  const res = rawRes || lastResRef.current;
+  const stale = !rawRes && !!res;
 
   const sG = (k, v) => setGeo((p) => ({ ...p, [k]: v }));
   const sW = (k, v) => setWind((p) => ({ ...p, [k]: v }));
@@ -436,7 +497,7 @@ export default function MiniMotorCad() {
 
   const TABS = [
     ["geometry", "Geometry"], ["winding", "Winding"], ["materials", "Materials"],
-    ["calculation", "Calculation"], ["output", "Output Data"],
+    ["calculation", "Calculation"], ["output", "Output Data"], ["graphs", "Graphs"],
   ];
 
   return (
@@ -446,6 +507,7 @@ export default function MiniMotorCad() {
         <div className="flex items-center gap-3 px-3 pt-2">
           <span className="font-bold text-sm tracking-tight">Mini Motor-CAD</span>
           <span className="text-xs" style={{ color: "#8893A0" }}>PMSM 기초설계 · 해석엔진 1250W-jk 검증</span>
+          {stale && <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "#7A1212", color: "#fff" }}>⚠ 입력값 비정상 — 마지막 유효 결과 표시 중</span>}
           <div className="flex-1" />
           <label className="text-xs flex items-center gap-1">
             <input type="checkbox" checked={showRef} onChange={(e) => setShowRef(e.target.checked)} />
@@ -476,6 +538,7 @@ export default function MiniMotorCad() {
         {tab === "materials" && <MaterialsTab mat={mat} sM={sM} res={res} showRef={showRef} />}
         {tab === "calculation" && <CalculationTab calc={calc} sC={sC} wind={wind} sW={sW} res={res} />}
         {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} />}
+        {tab === "graphs" && <GraphsTab res={res} calc={calc} />}
       </div>
     </div>
   );
@@ -715,7 +778,8 @@ function packConductors(geo, wind) {
   const x1 = Math.sqrt(Math.max(Rb * Rb - halfOp * halfOp, 0));
   const liner = wind.linerThk, r = wind.wireDia / 2, sep = wind.condSep;
   const wallLim = geo.toothWidth / 2 + liner;           // 치 중심선으로부터 최소거리
-  const xMin = x1 + geo.toothTipDepth + wind.wedgeDepth + liner;
+  const wedgeHold = wind.wedgeModel === "wound" ? 0 : wind.wedgeDepth;
+  const xMin = x1 + geo.toothTipDepth + wedgeHold + liner;
   const RdL = Rd - liner;
   const divHalf = wind.coilDivider / 2;
   const sD = Math.sin(dlt), cD = Math.cos(dlt);
@@ -808,12 +872,14 @@ function SlotViewer({ geo, wind }) {
     const wpoly = [W1, Wtop, ...arcPts(g2.RdL, aT, -aT, 40), [Wtop[0], -Wtop[1]], [W1[0], -W1[1]]];
     ctx.fillStyle = "#66DD66";
     poly(wpoly); ctx.fill();
-    // 4) 웨지(회색): 팁 영역
-    const halfOp = P.slotOpening / 2;
-    const xw0 = g2.x1 + P.toothTipDepth, xw1 = xw0 + wind.wedgeDepth;
-    ctx.fillStyle = "#AEBDC8";
-    poly([[xw0, halfOp + 0.35], [xw1, halfOp + 0.9], [xw1, -halfOp - 0.9], [xw0, -halfOp - 0.35]]);
-    ctx.fill();
+    // 4) 웨지(회색): 팁 영역 — Wedge 모델일 때만
+    if (wind.wedgeModel === "wedge") {
+      const halfOp = P.slotOpening / 2;
+      const xw0 = g2.x1 + P.toothTipDepth, xw1 = xw0 + wind.wedgeDepth;
+      ctx.fillStyle = "#AEBDC8";
+      poly([[xw0, halfOp + 0.35], [xw1, halfOp + 0.9], [xw1, -halfOp - 0.9], [xw0, -halfOp - 0.35]]);
+      ctx.fill();
+    }
     // 5) 코일 디바이더(연회색 세로 막대)
     ctx.fillStyle = "#E8EEF2";
     poly([[g2.xMin, g2.divHalf], [g2.RdL - 0.2, g2.divHalf], [g2.RdL - 0.2, -g2.divHalf], [g2.xMin, -g2.divHalf]]);
@@ -859,6 +925,7 @@ function SlotViewer({ geo, wind }) {
 }
 
 function WindingTab({ geo, wind, sW, res, showRef }) {
+  const [wireType, setWireType] = useState("direct");
   if (!res) return null;
   const wa = res.wa;
   const harmonics = [1, 3, 5, 7, 9, 11, 13];
@@ -878,10 +945,45 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
           </select>
         </div>
         <SectionHead color="#CC8800">Wire Selection</SectionHead>
+        <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA" }}>
+          <span className="text-xs">Wire Type</span>
+          <select value={wireType} onChange={(e) => setWireType(e.target.value)}
+            className="text-xs px-1 py-0.5 rounded" style={{ border: "1px solid #C8CFD6" }}>
+            <option value="direct">Diameter Input</option>
+            <option value="Metric">Metric Table</option>
+            <option value="AWG">AWG Table</option>
+            <option value="SWG">SWG Table</option>
+          </select>
+        </div>
+        {wireType !== "direct" && (
+          <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA" }}>
+            <span className="text-xs">Gauge</span>
+            <select value=""
+              onChange={(e) => {
+                const w = WIRE_TABLES[wireType][+e.target.value];
+                if (w) { sW("copperDia", w.cu); sW("wireDia", w.cov); }
+              }}
+              className="text-xs px-1 py-0.5 rounded w-32" style={{ border: "1px solid #C8CFD6", fontFamily: "Consolas,monospace" }}>
+              <option value="">— 선택 —</option>
+              {WIRE_TABLES[wireType].map((w, i) => (
+                <option key={i} value={i}>{w.label} → 피복 {w.cov.toFixed(3)}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <NumIn label="Wire Diameter" value={wind.wireDia} step={0.01} onChange={(v) => sW("wireDia", v)} />
         <NumIn label="Copper Diameter" value={wind.copperDia} step={0.01} onChange={(v) => sW("copperDia", v)} />
         <NumIn label="Strands in Hand" value={wind.strands} step={1} onChange={(v) => sW("strands", v)} />
         <SectionHead color="#1E7A1E">Insulation / 슬롯 내부</SectionHead>
+        <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA" }}>
+          <span className="text-xs">Wedge Model</span>
+          <select value={wind.wedgeModel} onChange={(e) => sW("wedgeModel", e.target.value)}
+            className="text-xs px-1 py-0.5 rounded" style={{ border: "1px solid #C8CFD6" }}>
+            <option value="wedge">Wedge</option>
+            <option value="wound">Wound Space</option>
+            <option value="air">Air</option>
+          </select>
+        </div>
         <NumIn label="Liner Thickness" value={wind.linerThk} step={0.05} onChange={(v) => sW("linerThk", v)} />
         <NumIn label="Wedge Depth" value={wind.wedgeDepth} step={0.1} onChange={(v) => sW("wedgeDepth", v)} />
         <NumIn label="Coil Divider" value={wind.coilDivider} step={0.05} onChange={(v) => sW("coilDivider", v)} />
@@ -896,6 +998,21 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
           <Row label="Cu Slot Fill" value={res.cuSlotFill.toFixed(4)} refv={showRef ? REF.cuSlotFill : undefined} />
           <Row label="Mean Coil Pitch" value={res.coilPitch.toFixed(2)} unit="mm" refv={showRef ? REF.coilPitch : undefined} />
           <Row label="MLT" value={res.MLT.toFixed(2)} unit="mm" refv={showRef ? REF.MLT : undefined} />
+          <Row label="EWdg MLT" value={res.ewdgMLT.toFixed(2)} unit="mm" refv={showRef ? REF.ewdgMLT : undefined} />
+        </tbody></table>
+        <SectionHead color="#1B7A2B">슬롯 면적 분해 (근사)</SectionHead>
+        <table className="w-full"><tbody>
+          <Row label="Winding Area (+Liner)" value={res.windingAreaLiner.toFixed(1)} unit="mm²" refv={showRef ? REF.windingAreaLiner : undefined} />
+          <Row label="Winding Area" value={res.windingArea.toFixed(1)} unit="mm²" refv={showRef ? REF.windingArea : undefined} />
+          <Row label="Winding Depth" value={res.windingDepth.toFixed(2)} unit="mm" refv={showRef ? REF.windingDepth : undefined} />
+          <Row label="Covered Wire Area" value={res.coveredWireArea.toFixed(2)} unit="mm²" refv={showRef ? REF.coveredWireArea : undefined} />
+          <Row label="Copper Area" value={res.copperArea.toFixed(2)} unit="mm²" refv={showRef ? REF.copperArea : undefined} />
+          <Row label="Impreg Area" value={res.impregArea.toFixed(2)} unit="mm²" refv={showRef ? REF.impregArea : undefined} />
+          <Row label="Wedge Area" value={res.wedgeArea.toFixed(3)} unit="mm²" refv={showRef ? REF.wedgeArea : undefined} />
+          <Row label="Liner Area" value={res.linerArea.toFixed(2)} unit="mm²" refv={showRef ? REF.linerArea : undefined} />
+          <Row label="Coil Divider Area" value={res.dividerArea.toFixed(3)} unit="mm²" refv={showRef ? REF.dividerArea : undefined} />
+          <Row label="Wire Fill (Wdg Area)" value={res.wireFillWdg.toFixed(4)} refv={showRef ? REF.wireFillWdg : undefined} />
+          <Row label="Heavy Build Slot Fill" value={res.heavyBuildFill.toFixed(3)} refv={showRef ? REF.heavyBuildFill : undefined} />
         </tbody></table>
       </div>
       {/* 중앙: 슬롯 단면 뷰어 */}
@@ -926,13 +1043,17 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
               <th className="px-1 py-0.5" style={{ color: "#2244CC" }}>Ph3</th>
             </tr></thead>
             <tbody>
-              {wa.table.map((r, i) => (
-                <tr key={i} style={{ borderTop: "1px solid #EEF1F4" }}>
-                  <td className="px-1 text-center">{i + 1}</td>
-                  <td className="px-1 text-center">{Math.abs(r[0]) + Math.abs(r[1]) + Math.abs(r[2])}</td>
-                  {r.map((v, j) => <td key={j} className="px-1 text-right">{v !== 0 ? v : ""}</td>)}
-                </tr>
-              ))}
+              {/* Motor-CAD 슬롯 번호 기준(슬롯1 = Ph1 집중)에 맞춰 1슬롯 오프셋 정렬 */}
+              {wa.table.map((_, i) => {
+                const r = wa.table[(i + wa.table.length - 1) % wa.table.length];
+                return (
+                  <tr key={i} style={{ borderTop: "1px solid #EEF1F4" }}>
+                    <td className="px-1 text-center">{i + 1}</td>
+                    <td className="px-1 text-center">{Math.abs(r[0]) + Math.abs(r[1]) + Math.abs(r[2])}</td>
+                    {r.map((v, j) => <td key={j} className="px-1 text-right">{v !== 0 ? v : ""}</td>)}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1231,8 +1352,23 @@ function OutputTab({ res, calc, showRef }) {
           <Tbl>
             {r("Conductors / Slot", f(res.condPerSlot, 0), "", 408, true)}
             {r("Slot Area", f(res.slotArea, 1), "mm²", 160.3)}
+            {r("Winding Area (+Liner)", f(res.windingAreaLiner, 1), "mm²", 152.2)}
+            {r("Winding Area", f(res.windingArea, 1), "mm²", 132.5)}
+            {r("Winding Depth", f(res.windingDepth, 2), "mm", 12.882)}
+            {r("Covered Wire Area", f(res.coveredWireArea, 2), "mm²", 80.11)}
+            {r("Copper Area", f(res.copperArea, 2), "mm²", 64.89)}
+            {r("Impreg Area", f(res.impregArea, 2), "mm²", 52.36)}
+            {r("Wedge Area", f(res.wedgeArea, 3), "mm²", 1.627)}
+            {r("Liner Area", f(res.linerArea, 2), "mm²", 19.73)}
+            {r("Coil Divider Area", f(res.dividerArea, 3), "mm²", 6.441)}
+            {r("Wire Slot Fill (Wdg Area)", f(res.wireFillWdg, 4), "", 0.6047)}
             {r("Wire Slot Fill (Slot Area)", f(res.wireSlotFill, 4), "", 0.4999)}
             {r("Copper Slot Fill (Slot Area)", f(res.cuSlotFill, 4), "", 0.4049)}
+            {r("Heavy Build Slot Fill", f(res.heavyBuildFill, 3), "", 0.77)}
+            {r("EWdg MLT", f(res.ewdgMLT, 2), "mm", 32.99)}
+            {r("EWdg Fill (추정)", f(res.ewdgFill, 4), "", 0.3794)}
+            {r("Volume Copper Active", f(res.volCuActive, 0), "mm³", 35040)}
+            {r("Volume Copper EWdg F/R", f(res.volCuEwdg, 0), "mm³", 9633)}
           </Tbl>
         </>)}
         {sub === "matl" && (
@@ -1248,6 +1384,193 @@ function OutputTab({ res, calc, showRef }) {
           </Tbl>
         )}
         <div className="w-full text-xs" style={{ color: "#8893A0" }}>녹색 열 = 1250W-jk Motor-CAD FEA 참조값. (추정) 표기는 해석식 근사 항목.</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Graphs 탭 (해석식 합성 파형 — FEA 아님, 추정치) ─────────────
+function Plot({ title, sub, series, h = 190, step = false }) {
+  const Wp = 460, P = { l: 46, r: 10, t: 8, b: 20 };
+  const xs = series.flatMap((s) => s.x), ys = series.flatMap((s) => s.y);
+  let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y1 - y0 < 1e-12) { y0 -= 1; y1 += 1; }
+  const pad = (y1 - y0) * 0.08; y0 -= pad; y1 += pad;
+  const sx = (x) => P.l + ((x - x0) / (x1 - x0)) * (Wp - P.l - P.r);
+  const sy = (y) => h - P.b - ((y - y0) / (y1 - y0)) * (h - P.t - P.b);
+  return (
+    <div className="rounded" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
+      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
+        {title} {sub && <span className="font-normal" style={{ color: "#8893A0" }}>{sub}</span>}
+      </div>
+      <svg width={Wp} height={h} style={{ display: "block" }}>
+        {Array.from({ length: 5 }, (_, i) => {
+          const yv = y0 + ((y1 - y0) * i) / 4;
+          return (
+            <g key={"y" + i}>
+              <line x1={P.l} x2={Wp - P.r} y1={sy(yv)} y2={sy(yv)} stroke="#EEF1F4" />
+              <text x={P.l - 4} y={sy(yv) + 3} fontSize="9" fill="#8893A0" textAnchor="end">{yv.toPrecision(3)}</text>
+            </g>
+          );
+        })}
+        {Array.from({ length: 7 }, (_, i) => {
+          const xv = x0 + ((x1 - x0) * i) / 6;
+          return (
+            <g key={"x" + i}>
+              <line y1={P.t} y2={h - P.b} x1={sx(xv)} x2={sx(xv)} stroke="#F4F6F8" />
+              <text y={h - P.b + 12} x={sx(xv)} fontSize="9" fill="#8893A0" textAnchor="middle">{Math.round(xv)}</text>
+            </g>
+          );
+        })}
+        {y0 < 0 && y1 > 0 && <line x1={P.l} x2={Wp - P.r} y1={sy(0)} y2={sy(0)} stroke="#C8CFD6" />}
+        {series.map((s, k) => (
+          <polyline key={k} fill="none" stroke={s.color} strokeWidth="1.4"
+            points={s.y.map((yv, i) => {
+              if (!step) return sx(s.x[i]) + "," + sy(yv);
+              const nx = i + 1 < s.x.length ? sx(s.x[i + 1]) : Wp - P.r;
+              return sx(s.x[i]) + "," + sy(yv) + " " + nx + "," + sy(yv);
+            }).join(" ")} />
+        ))}
+      </svg>
+      <div className="flex gap-3 px-2 pb-1 text-xs">
+        {series.map((s, k) => s.label && <span key={k} style={{ color: s.color }}>— {s.label}</span>)}
+      </div>
+    </div>
+  );
+}
+
+function Bars({ title, sub, values, h = 190 }) {
+  const Wp = 460, P = { l: 40, r: 8, t: 10, b: 20 };
+  const vmax = Math.max(...values, 1e-9) * 1.08;
+  const bw = (Wp - P.l - P.r) / values.length;
+  return (
+    <div className="rounded" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
+      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
+        {title} {sub && <span className="font-normal" style={{ color: "#8893A0" }}>{sub}</span>}
+      </div>
+      <svg width={Wp} height={h} style={{ display: "block" }}>
+        {values.map((v, i) => {
+          const bh = (v / vmax) * (h - P.t - P.b);
+          return <rect key={i} x={P.l + i * bw + 1} width={Math.max(bw - 2, 1)} y={h - P.b - bh} height={bh} fill="#CC2222" />;
+        })}
+        {values.map((_, i) => ((i + 1) % 2 === 0 ? (
+          <text key={"t" + i} x={P.l + i * bw + bw / 2} y={h - P.b + 12} fontSize="9" fill="#8893A0" textAnchor="middle">{i + 1}</text>
+        ) : null))}
+        <text x={P.l - 4} y={P.t + 4} fontSize="9" fill="#8893A0" textAnchor="end">{vmax.toPrecision(3)}</text>
+        <line x1={P.l} x2={Wp - P.r} y1={h - P.b} y2={h - P.b} stroke="#C8CFD6" />
+      </svg>
+    </div>
+  );
+}
+
+function PhasorPlot({ chains }) {
+  const Wp = 300, C = Wp / 2;
+  const all = chains.flat();
+  const rmax = Math.max(...all.map(([x, y]) => Math.hypot(x, y)), 1e-9) * 1.15;
+  const s = (v) => (v / rmax) * (C - 14);
+  const cols = ["#CC2222", "#1B7A2B", "#2244CC"];
+  return (
+    <div className="rounded" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
+      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
+        Winding Phasors <span className="font-normal" style={{ color: "#8893A0" }}>코일 EMF 페이저 체인</span>
+      </div>
+      <svg width={Wp} height={Wp} style={{ display: "block" }}>
+        <circle cx={C} cy={C} r={C - 14} fill="none" stroke="#D5DBE1" strokeDasharray="3 3" />
+        <line x1={14} x2={Wp - 14} y1={C} y2={C} stroke="#EEF1F4" />
+        <line y1={14} y2={Wp - 14} x1={C} x2={C} stroke="#EEF1F4" />
+        {chains.map((pts, p) => (
+          <g key={p}>
+            <polyline fill="none" stroke={cols[p]} strokeWidth="1.5"
+              points={pts.map(([x, y]) => (C + s(x)) + "," + (C - s(y))).join(" ")} />
+            {pts.map(([x, y], i) => (i > 0 ? <circle key={i} cx={C + s(x)} cy={C - s(y)} r="2.5" fill={cols[p]} /> : null))}
+          </g>
+        ))}
+      </svg>
+      <div className="flex gap-3 px-2 pb-1 text-xs">
+        {["Ph1", "Ph2", "Ph3"].map((l, i) => <span key={i} style={{ color: cols[i] }}>— {l}</span>)}
+      </div>
+    </div>
+  );
+}
+
+function GraphsTab({ res, calc }) {
+  const data = useMemo(() => {
+    if (!res) return null;
+    const N = 241;
+    const harm = [1, 3, 5, 7, 9, 11, 13];
+    const a = res.magnetAlpha, s1 = Math.sin((Math.PI * a) / 2);
+    // 공극자속 사다리꼴 분해 → BEMF 고조파: (kw_n/kw_1)·sin(nπα/2)/(n·sin(πα/2))
+    const eRel = harm.map((n) => (res.wa.kw(n) / res.kw1) * (Math.sin((n * Math.PI * a) / 2) / (n * s1)));
+    const IphPk = res.IphRms * Math.SQRT2;
+    const adv = calc.phaseAdv * D2R;
+    const wm = (calc.speed * 2 * Math.PI) / 60;
+    const deg = Array.from({ length: N }, (_, i) => (i * 360) / (N - 1));
+    const sh = [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3];
+    const eW = sh.map((p) => deg.map((d) => harm.reduce((s, n, k) => s + res.Epk * eRel[k] * Math.cos(n * (d * D2R - p)), 0)));
+    const iW = sh.map((p) => deg.map((d) => IphPk * Math.cos(d * D2R - p + adv)));
+    const tq = deg.map((_, i) => (eW[0][i] * iW[0][i] + eW[1][i] * iW[1][i] + eW[2][i] * iW[2][i]) / wm);
+    const tAvg = tq.reduce((x, y) => x + y, 0) / N;
+    const ripple = tAvg > 0 ? ((Math.max(...tq) - Math.min(...tq)) / tAvg) * 100 : 0;
+    // MMF: 슬롯별 도체수 누적합(평균 제거), 전류 ia=1, ib=ic=-0.5
+    const Ns = res.wa.table.length;
+    const cum = (ph) => {
+      let c = 0;
+      const arr = res.wa.table.map((r2) => (c += r2[ph]));
+      const m = arr.reduce((x, y) => x + y, 0) / Ns;
+      return arr.map((v) => v - m);
+    };
+    const m1 = cum(0), m2 = cum(1), m3 = cum(2);
+    const mTot = m1.map((v, k) => v - 0.5 * m2[k] - 0.5 * m3[k]);
+    const slotX = Array.from({ length: Ns }, (_, k) => k + 1);
+    // MMF 공간고조파: 스텝 파형을 슬롯당 16샘플로 펼쳐 DFT
+    const fine = [];
+    mTot.forEach((v) => { for (let q = 0; q < 16; q++) fine.push(v); });
+    const M = fine.length, mag = [];
+    for (let hh = 1; hh <= 24; hh++) {
+      let re = 0, im = 0;
+      fine.forEach((v, k) => { const t = (2 * Math.PI * hh * k) / M; re += v * Math.cos(t); im -= v * Math.sin(t); });
+      mag.push((Math.hypot(re, im) * 2) / M);
+    }
+    // 코일 EMF 페이저 체인 (상별 tip-to-tail)
+    const chains = [0, 1, 2].map((p) => {
+      let x = 0, y = 0;
+      const pts = [[0, 0]];
+      res.wa.coils.filter((c) => c.phase === p).forEach((c) => {
+        const g = res.wa.theta[c.go] * D2R, r2 = res.wa.theta[c.ret] * D2R;
+        x += c.sign * (Math.cos(g) - Math.cos(r2));
+        y += c.sign * (Math.sin(g) - Math.sin(r2));
+        pts.push([x, y]);
+      });
+      return pts;
+    });
+    return { deg, eW, iW, tq, tAvg, ripple, slotX, m1, mTot, mag, chains };
+  }, [res, calc]);
+  if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
+  return (
+    <div className="h-full overflow-auto p-3 flex flex-wrap gap-3" style={{ alignContent: "flex-start" }}>
+      <Plot title="Torque" sub={"해석식 추정 · 평균 " + data.tAvg.toFixed(3) + " Nm · 리플 " + data.ripple.toFixed(2) + "% (FEA 2.09%)"}
+        series={[{ x: data.deg, y: data.tq, color: "#2244CC", label: "Torque [Nm] vs EDeg" }]} />
+      <Plot title="Back EMF Phase Voltage" sub="고조파 합성 1·3·5·7·9·11·13차 [V]"
+        series={[
+          { x: data.deg, y: data.eW[0], color: "#CC2222", label: "Ph1" },
+          { x: data.deg, y: data.eW[1], color: "#1B7A2B", label: "Ph2" },
+          { x: data.deg, y: data.eW[2], color: "#2244CC", label: "Ph3" },
+        ]} />
+      <Plot title="Phase Currents" sub="정현 구동 [A]"
+        series={[
+          { x: data.deg, y: data.iW[0], color: "#CC2222", label: "Ph1" },
+          { x: data.deg, y: data.iW[1], color: "#1B7A2B", label: "Ph2" },
+          { x: data.deg, y: data.iW[2], color: "#2244CC", label: "Ph3" },
+        ]} />
+      <Plot title="Winding MMF" sub="슬롯 스텝 · ia=1, ib=ic=−0.5 [At]" step
+        series={[
+          { x: data.slotX, y: data.mTot, color: "#1A222C", label: "Sum" },
+          { x: data.slotX, y: data.m1, color: "#CC2222", label: "Ph1" },
+        ]} />
+      <Bars title="MMF Harmonics" sub="공간(기계) 고조파 [At] — 극쌍수에서 피크" values={data.mag} />
+      <PhasorPlot chains={data.chains} />
+      <div className="w-full text-xs" style={{ color: "#8893A0" }}>
+        모든 파형은 해석식 합성 추정치 — 슬롯팅·포화·코깅 미반영. 정밀 파형은 Motor-CAD/Maxwell FEA로 검증.
       </div>
     </div>
   );

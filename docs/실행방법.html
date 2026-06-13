@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body { font-family: "Malgun Gothic", "Noto Sans KR", sans-serif; color: #1A222C; font-size: 11pt; line-height: 1.65; }
+  h1 { font-size: 20pt; border-bottom: 3px solid #1A222C; padding-bottom: 6px; margin-bottom: 2px; }
+  .sub { color: #5C6B7A; font-size: 10pt; margin-bottom: 24px; }
+  h2 { font-size: 13pt; margin-top: 26px; margin-bottom: 8px; border-left: 4px solid #B5622D; padding-left: 8px; }
+  code, pre { font-family: Consolas, monospace; background: #F0F2F4; border-radius: 3px; }
+  code { padding: 1px 5px; font-size: 10pt; }
+  pre { padding: 10px 14px; border: 1px solid #D5DBE1; font-size: 10.5pt; line-height: 1.5; }
+  table { border-collapse: collapse; width: 100%; font-size: 10pt; margin-top: 6px; }
+  th, td { border: 1px solid #C8CFD6; padding: 5px 9px; text-align: left; }
+  th { background: #E8EBEE; }
+  .tip { background: #FCF6EE; border: 1px solid #E8D5B5; border-radius: 4px; padding: 8px 12px; font-size: 10pt; margin-top: 8px; }
+  .warn { background: #FDF0F0; border: 1px solid #E5B5B5; border-radius: 4px; padding: 8px 12px; font-size: 10pt; margin-top: 8px; }
+  .step { font-weight: bold; color: #B5622D; }
+  ol li, ul li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Mini Motor-CAD 실행 방법</h1>
+<div class="sub">PMSM 기초설계 도구 · 1250W-jk 검증 해석엔진 · 작성일 2026-06-13</div>
+
+<h2>1. 준비물 (최초 1회)</h2>
+<ul>
+  <li><b>Node.js 18 이상</b> — <code>https://nodejs.org</code> 에서 LTS 버전 설치</li>
+  <li>설치 확인: 터미널(명령 프롬프트 또는 PowerShell)에서 <code>node -v</code> 입력 → 버전이 표시되면 OK</li>
+</ul>
+
+<h2>2. 프로그램 실행</h2>
+<ol>
+  <li><span class="step">터미널 열기</span> — 시작 메뉴에서 "PowerShell" 또는 "명령 프롬프트" 실행</li>
+  <li><span class="step">앱 폴더로 이동</span>
+    <pre>cd c:\Users\user\Desktop\mini-motorcad-main\app</pre></li>
+  <li><span class="step">개발 서버 시작</span>
+    <pre>npm run dev</pre></li>
+  <li><span class="step">브라우저로 열기</span> — 터미널에 아래처럼 주소가 표시됨
+    <pre>  ➜  Local:   http://localhost:5173/</pre>
+    이 주소를 <b>Ctrl + 클릭</b>하거나, 브라우저 주소창에 직접 입력</li>
+</ol>
+<div class="tip">💡 처음 받은 PC이거나 <code>npm run dev</code>에서 모듈 오류가 나면, 같은 폴더에서 <code>npm install</code>을 먼저 한 번 실행한 뒤 다시 <code>npm run dev</code> 하세요.</div>
+
+<h2>3. 종료 방법</h2>
+<ul>
+  <li>터미널 창에서 <b>Ctrl + C</b> → 서버 종료</li>
+  <li>브라우저 탭은 그냥 닫으면 됨</li>
+</ul>
+
+<h2>4. 탭 구성 요약</h2>
+<table>
+  <tr><th>탭</th><th>기능</th></tr>
+  <tr><td>Geometry</td><td>DXF 단면 불러오기 + 파라메트릭 형상 매칭, 측정도구(거리/반경), 레이어 토글</td></tr>
+  <tr><td>Winding</td><td>슬롯 단면 실시간 도선 패킹 — 와이어 지름·턴수·가닥수·라이너를 바꾸면 즉시 반영. AWG/Metric/SWG 게이지 테이블, Wedge Model, 슬롯 면적 분해·충전율</td></tr>
+  <tr><td>Materials</td><td>강판/자석 재질 선택, 중량 계산, 철손계수 편집</td></tr>
+  <tr><td>Calculation</td><td>구동조건(속도·전류·전압·온도), 해석모델 보정계수</td></tr>
+  <tr><td>Output Data</td><td>성능 출력 전체 (Motor-CAD FEA 참조값 비교열 포함)</td></tr>
+  <tr><td>Graphs</td><td>BEMF/토크/전류 파형, 권선 MMF·공간고조파, 코일 페이저</td></tr>
+</table>
+
+<h2>5. 자주 겪는 문제</h2>
+<table>
+  <tr><th>증상</th><th>해결</th></tr>
+  <tr><td><code>'npm'은(는) 내부 또는 외부 명령...</code></td><td>Node.js 미설치 — nodejs.org에서 설치 후 터미널을 새로 열기</td></tr>
+  <tr><td><code>Cannot find module ...</code> 오류</td><td><code>app</code> 폴더에서 <code>npm install</code> 실행 후 재시도</td></tr>
+  <tr><td>5173 포트가 이미 사용 중</td><td>기존 터미널의 서버를 Ctrl+C로 끄거나, 자동으로 뜨는 5174 등 다른 주소 사용</td></tr>
+  <tr><td>화면이 깨져 보임</td><td>브라우저 새로고침(Ctrl+F5). 그래도 안 되면 서버 재시작</td></tr>
+  <tr><td>입력칸을 지웠더니 "⚠ 입력값 비정상" 표시</td><td>정상 동작 — 값을 다시 입력하면 자동으로 사라짐 (마지막 유효 결과를 유지해 주는 기능)</td></tr>
+</table>
+
+<h2>6. 참고</h2>
+<ul>
+  <li>dev 모드는 코드를 수정하면 브라우저에 즉시 반영됨 — 입맛대로 고쳐가며 쓰기에 적합</li>
+  <li>설계 데이터는 우측 상단 <b>"설계 JSON 내보내기"</b> 버튼으로 저장 가능</li>
+  <li>해석 수식·검증 과정: <code>docs/DEVELOPMENT_LOG.md</code>, 재현 스크립트: <code>validation/validate_engine.py</code></li>
+</ul>
+<div class="warn">⚠ 이 저장소에는 사내 설계 데이터(1250W-jk)가 포함되어 있으므로 외부 공유 금지.</div>
+
+</body>
+</html>

@@ -24,10 +24,11 @@ npm run dev
 | 탭 | 기능 |
 |---|---|
 | Geometry | DXF 단면 임포트 + 파라메트릭 형상 오버레이 매칭, 측정 도구(거리/반경), 레이어 토글 |
-| Winding | 슬롯 단면 실시간 도선 패킹(라이너·웨지·코일디바이더·절연링), 공간부족 경고, star-of-slots 패턴/권선계수 자동 생성 |
+| Winding | 슬롯 단면 실시간 도선 패킹(라이너·웨지·코일디바이더·절연링), 공간부족 경고, star-of-slots 패턴/권선계수 자동 생성, AWG/Metric/SWG 와이어 테이블, Wedge Model(Wedge/Wound Space/Air), 슬롯 면적 분해(Winding/Covered/Copper/Impreg Area, Heavy Build Fill) |
 | Materials | 컴포넌트별 재질 그리드(강판/자석 드롭다운), 중량 계산, 철손계수 편집 |
 | Calculation | Drive 패널(전류정의 Peak/RMS, Star/Delta, 위상각, 온도), 해석모델 보정계수 |
 | Output Data | 하위탭 Drive/E-Magnetics/Flux/Losses/Winding/Materials, Motor-CAD FEA 참조값 비교열 |
+| Graphs | BEMF/토크리플/전류 파형(고조파 합성 추정), 권선 MMF 스텝+공간고조파, 코일 EMF 페이저 체인 |
 
 ## 해석 엔진 검증 (1250W-jk Motor-CAD FEA 대비)
 
