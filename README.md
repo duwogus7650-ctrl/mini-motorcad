@@ -11,6 +11,14 @@ Ansys Motor-CAD의 기초설계 워크플로우(형상 → 권선 → 재질 →
 
 Node.js 18 이상 필요 (https://nodejs.org)
 
+### 가장 쉬운 방법 (Windows)
+
+저장소 루트의 **`run_gui.bat` 더블클릭**. 최초 실행 시 의존성을 자동 설치하고,
+개발 서버가 준비되면 브라우저(http://localhost:5173)가 자동으로 열린다.
+종료하려면 콘솔 창에서 Ctrl+C 또는 창을 닫는다.
+
+### 수동 실행
+
 ```bash
 cd app
 npm install
