@@ -875,10 +875,6 @@ function GeometryTab({ geo, sG, res }) {
           <input ref={fileRef} type="file" accept=".dxf" className="hidden"
             onChange={(e) => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ""; }} />
           {dxfName && <div className="text-xs truncate" style={{ color: "#1B7A2B", fontFamily: "Consolas,monospace" }}>{dxfName}</div>}
-          <button onClick={() => { if (confirm("형상 파라미터를 1250W-jk 검증값으로 되돌립니다.")) Object.entries(GEO0).forEach(([k, v]) => sG(k, v)); }}
-            className="text-xs px-2 py-1 rounded font-medium" style={{ border: "1px solid #B5622D", color: "#B5622D", background: "#fff" }}>
-            ↺ 검증값(1250W-jk) 리셋
-          </button>
           <div className="flex gap-1">
             <button onClick={fitView} className="flex-1 text-xs px-2 py-1 rounded" style={{ border: "1px solid #1A222C", background: "#fff" }}>화면 맞춤</button>
             <button onClick={() => { setMeasure(!measure); setMPts([]); }} className="flex-1 text-xs px-2 py-1 rounded"
