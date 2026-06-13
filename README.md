@@ -31,7 +31,7 @@ npm run dev
 
 | 탭 | 기능 |
 |---|---|
-| Geometry | DXF 단면 임포트 + 파라메트릭 형상 오버레이 매칭, 측정 도구(거리/반경), 레이어 토글 |
+| Geometry | DXF 단면 임포트 + 파라메트릭 형상 오버레이 매칭, **자동 정렬·형상 추출**(동심원/폴리라인 분석 → 중심정렬·OD·보어·샤프트·슬롯/극수·에어갭·회전각 자동 산출), 측정 도구(거리/반경), 레이어 토글 |
 | Winding | 슬롯 단면 실시간 도선 패킹(라이너·웨지·코일디바이더·절연링), 공간부족 경고, star-of-slots 패턴/권선계수 자동 생성, AWG/Metric/SWG 와이어 테이블, Wedge Model(Wedge/Wound Space/Air), 슬롯 면적 분해(Winding/Covered/Copper/Impreg Area, Heavy Build Fill) |
 | Materials | 컴포넌트별 재질 그리드(강판/자석 드롭다운), 중량 계산, 철손계수 편집 |
 | Calculation | Drive 패널(전류정의 Peak/RMS, Star/Delta, 위상각, 온도), 해석모델 보정계수 |

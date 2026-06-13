@@ -102,6 +102,75 @@ function polyFromVerts(verts, closed) {
   return { type: "poly", pts, closed };
 }
 
+// ─── DXF 자동 형상 추출 ──────────────────────────────────────────
+// 동심원/닫힌 폴리라인을 분석해 중심·단위·외경·보어·샤프트·슬롯/극수·에어갭·회전각 추정.
+function extractGeometry(shapes) {
+  const circles = [];      // CIRCLE + ARC (중심·반경)
+  const closed = [];       // 닫힌 폴리라인 점배열
+  const allPts = [];
+  for (const s of shapes) {
+    if (s.type === "circle") circles.push({ cx: s.cx, cy: s.cy, r: s.r });
+    else if (s.type === "arc") circles.push({ cx: s.cx, cy: s.cy, r: s.r });
+    else if (s.type === "poly" && s.pts && s.pts.length) {
+      s.pts.forEach((p) => { if (isFinite(p[0]) && isFinite(p[1])) allPts.push(p); });
+      if (s.closed && s.pts.length >= 3) closed.push(s.pts);
+    }
+  }
+  // 중심: 원 중심들의 중앙값(견고), 없으면 점 바운딩박스 중심
+  let cx, cy;
+  const med = (arr) => { const a = arr.slice().sort((p, q) => p - q); return a[Math.floor(a.length / 2)]; };
+  if (circles.length) { cx = med(circles.map((c) => c.cx)); cy = med(circles.map((c) => c.cy)); }
+  else if (allPts.length) {
+    const xs = allPts.map((p) => p[0]), ys = allPts.map((p) => p[1]);
+    cx = (Math.min(...xs) + Math.max(...xs)) / 2; cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  } else return null;
+  const R = (x, y) => Math.hypot(x - cx, y - cy);
+  let maxR = 0;
+  circles.forEach((c) => { maxR = Math.max(maxR, R(c.cx, c.cy) + c.r); });
+  allPts.forEach((p) => { maxR = Math.max(maxR, R(p[0], p[1])); });
+  if (maxR <= 0) return null;
+  const unit = maxR < 5 ? 1000 : 1;                  // 5 미만이면 m로 보고 mm 변환
+  // 동심원(중심 근처) → 지름 목록(병합)
+  const conc = circles.filter((c) => R(c.cx, c.cy) < 0.03 * maxR);
+  let dias = [...new Set(conc.map((c) => +(2 * c.r * unit).toFixed(2)))].sort((a, b) => b - a);
+  const merged = [];
+  dias.forEach((d) => { if (!merged.some((m) => Math.abs(m - d) < 0.3)) merged.push(d); });
+  dias = merged;
+  // 닫힌 폴리 → 무게중심반경·내/외반경·중심각
+  const polyInfo = closed.map((pts) => {
+    let sx = 0, sy = 0; pts.forEach((p) => { sx += p[0]; sy += p[1]; });
+    const gx = sx / pts.length, gy = sy / pts.length;
+    return { rc: R(gx, gy) * unit, rin: Math.min(...pts.map((p) => R(p[0], p[1]))) * unit,
+      rout: Math.max(...pts.map((p) => R(p[0], p[1]))) * unit, ang: Math.atan2(gy - cy, gx - cx) / D2R };
+  }).filter((p) => p.rc > 0.02 * maxR * unit);       // 중심부 잡음 제외
+  // 무게중심반경 최대 갭으로 슬롯(외)·자석(내) 분리
+  let slotCount = 0, poleCount = 0, statorBore = 0, rotorOD = 0, airgap = 0, statorRot = 0, rotorRot = 0;
+  if (polyInfo.length) {
+    const rcs = polyInfo.map((p) => p.rc).sort((a, b) => a - b);
+    let gi = -1, gv = 0;
+    for (let i = 1; i < rcs.length; i++) { const g = rcs[i] - rcs[i - 1]; if (g > gv) { gv = g; gi = i; } }
+    const thr = gi > 0 && gv > 0.8 ? (rcs[gi - 1] + rcs[gi]) / 2 : -Infinity;
+    const outer = polyInfo.filter((p) => p.rc >= thr);   // 슬롯
+    const inner = polyInfo.filter((p) => p.rc < thr);    // 자석
+    const wrap = (a, p) => a - p * Math.round(a / p);
+    if (outer.length) {
+      slotCount = outer.length; statorBore = 2 * Math.min(...outer.map((p) => p.rin));
+      const sp = 360 / slotCount; statorRot = wrap(outer[0].ang, sp);
+    }
+    if (inner.length) {
+      poleCount = inner.length; rotorOD = 2 * Math.max(...inner.map((p) => p.rout));
+      const pp = 360 / poleCount; rotorRot = wrap(inner[0].ang, pp);
+    }
+    if (statorBore && rotorOD) airgap = (statorBore - rotorOD) / 2;
+  }
+  const statorLamDia = +(2 * maxR * unit).toFixed(2);
+  if (!statorBore && dias.length >= 2) statorBore = dias[1];   // 폴리 미검출 시 동심원 차선
+  const shaftDia = dias.length ? dias[dias.length - 1] : 0;
+  return { cx, cy, unit, dias, statorLamDia, statorBore: +statorBore.toFixed(2),
+    shaftDia: +shaftDia.toFixed(2), slotCount, poleCount, rotorOD: +rotorOD.toFixed(2),
+    airgap: +airgap.toFixed(2), statorRot: +statorRot.toFixed(1), rotorRot: +rotorRot.toFixed(1) };
+}
+
 // ─── 형상 생성 ───────────────────────────────────────────────────
 function buildSlotPath(P) {
   const Rb = P.statorBore / 2, Rd = Rb + P.slotDepth, halfOp = P.slotOpening / 2;
@@ -552,6 +621,7 @@ export default function MiniMotorCad() {
 function GeometryTab({ geo, sG, res }) {
   const [dxf, setDxf] = useState(null);
   const [dxfName, setDxfName] = useState("");
+  const [autoInfo, setAutoInfo] = useState(null);
   const [dxfT, setDxfT] = useState({ scale: 1, dx: 0, dy: 0, rot: 0 });
   const [layers, setLayers] = useState({ dxf: true, stator: true, slots: true, rotor: true, magnets: true });
   const [opacity, setOpacity] = useState(0.45);
@@ -693,8 +763,25 @@ function GeometryTab({ geo, sG, res }) {
     try {
       const shapes = parseDxf(text);
       if (!shapes.length) throw new Error("no entities");
-      setDxf(shapes); setDxfName(file.name);
+      setDxf(shapes); setDxfName(file.name); setAutoInfo(null);
     } catch (err) { alert("DXF 파싱 실패: " + err.message); }
+  };
+  const autoExtract = () => {
+    if (!dxf) { alert("먼저 DXF를 불러오세요."); return; }
+    const ex = extractGeometry(dxf);
+    if (!ex) { alert("형상을 추출할 수 없습니다 (원/닫힌 폴리라인 없음)."); return; }
+    setDxfT({ scale: ex.unit, dx: -ex.cx * ex.unit, dy: -ex.cy * ex.unit, rot: 0 });
+    const applied = [];
+    const put = (k, v, lo, hi, dec = 2) => { if (isFinite(v) && v > lo && v < hi) { sG(k, +v.toFixed(dec)); applied.push(k); } };
+    put("statorLamDia", ex.statorLamDia, 5, 2000);
+    put("statorBore", ex.statorBore, 2, ex.statorLamDia);
+    put("shaftDia", ex.shaftDia, 1, ex.statorBore || 1e9);
+    if (ex.slotCount >= 3 && ex.slotCount <= 90) { sG("slotNumber", ex.slotCount); applied.push("slotNumber"); }
+    if (ex.poleCount >= 2 && ex.poleCount <= 80) { sG("poleNumber", ex.poleCount); applied.push("poleNumber"); }
+    put("airgap", ex.airgap, 0.05, 5);
+    if (isFinite(ex.statorRot)) { sG("statorRot", +ex.statorRot.toFixed(1)); applied.push("statorRot"); }
+    if (isFinite(ex.rotorRot)) { sG("rotorRot", +ex.rotorRot.toFixed(1)); applied.push("rotorRot"); }
+    setAutoInfo({ ...ex, applied });
   };
   const mDist = mPts.length === 2 ? Math.hypot(mPts[1][0] - mPts[0][0], mPts[1][1] - mPts[0][1]) : null;
 
@@ -728,6 +815,20 @@ function GeometryTab({ geo, sG, res }) {
               측정 {measure ? "ON" : "OFF"}
             </button>
           </div>
+          <button onClick={autoExtract} disabled={!dxf} className="text-xs px-2 py-1.5 rounded text-white font-medium"
+            style={{ background: dxf ? "#1B7A2B" : "#A8B2BC", cursor: dxf ? "pointer" : "default" }}>
+            ⚙ 자동 정렬·형상 추출
+          </button>
+          {autoInfo && (
+            <div className="text-xs rounded p-2 mt-0.5" style={{ background: "#F0F7F1", border: "1px solid #BBD9C0", fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
+              <div className="font-bold mb-0.5" style={{ color: "#1B7A2B" }}>추출 결과 (단위 ×{autoInfo.unit})</div>
+              <div>OD {autoInfo.statorLamDia} · 보어 {autoInfo.statorBore} · 샤프트 {autoInfo.shaftDia}</div>
+              <div>슬롯 {autoInfo.slotCount || "?"} · 극 {autoInfo.poleCount || "?"} · 에어갭 {autoInfo.airgap || "?"}</div>
+              <div>회전 stator {autoInfo.statorRot}° · rotor {autoInfo.rotorRot}°</div>
+              <div style={{ color: "#5C6B7A" }}>동심원 Ø: {autoInfo.dias.join(", ") || "없음"}</div>
+              <div style={{ color: "#8893A0", marginTop: 2 }}>적용 {autoInfo.applied.length}개 — 오버레이 확인 후 미세조정</div>
+            </div>
+          )}
         </div>
         <SectionHead color="#E03030">Stator Parameters</SectionHead>
         {SFIELDS.map(([k, l, s]) => <NumIn key={k} label={l} value={geo[k]} step={s} onChange={(v) => sG(k, v)} />)}
