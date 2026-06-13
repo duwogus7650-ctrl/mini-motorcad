@@ -1770,10 +1770,11 @@ function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
     segs.forEach((sg, si) => contourEls.push(
       <line key={"c" + lv + "_" + si} x1={sx(sg[0][0]).toFixed(1)} y1={sy(sg[0][1]).toFixed(1)} x2={sx(sg[1][0]).toFixed(1)} y2={sy(sg[1][1]).toFixed(1)}
         stroke="#1a1a1a" strokeWidth={major ? 0.7 : 0.4} opacity={major ? 0.55 : 0.3} />));
-    if (major) {                                   // 가장 왼쪽 선분에 레벨 라벨
-      let best = segs[0], bx = sx(segs[0][0][0]);
-      segs.forEach((sg) => { const xx = sx(sg[0][0]); if (xx < bx) { bx = xx; best = sg; } });
-      labelEls.push(<text key={"cl" + lv} x={sx(best[0][0]).toFixed(1)} y={sy(best[0][1]).toFixed(1)} fontSize="8.5" fontWeight="bold" fill="#111" stroke="#fff" strokeWidth="0.5" paintOrder="stroke">{lv}</text>);
+    // 라벨: 짝수(또는 최상위) 레벨만, 등고선의 중앙(median-y) 선분에 배치 → 구석 뭉침 방지
+    if (lv % 2 === 0 || lv >= top - 1) {
+      const sorted = segs.slice().sort((a, b) => a[0][1] - b[0][1]);
+      const mid = sorted[Math.floor(sorted.length / 2)];
+      labelEls.push(<text key={"cl" + lv} x={sx(mid[0][0]).toFixed(1)} y={sy(mid[0][1]).toFixed(1)} fontSize="8.5" fontWeight="bold" fill="#111" stroke="#fff" strokeWidth="0.6" paintOrder="stroke">{lv}</text>);
     }
   }
   return (
@@ -1899,7 +1900,7 @@ function GraphsTab({ res, calc, solved }) {
     const effGrid = effTorques.map((Tt) => effSpeeds.map((n) => {
       const wm = (n * 2 * Math.PI) / 60, we = pp * wm;
       const kac = 1 + kacRated * (n / nRated) ** 2;                  // AC 동손비(속도² 스케일)
-      let bestPcu = Infinity, bestEff = null;
+      let bestPcu = Infinity, bestEff = 0, feasible = false;
       for (let k = 0; k <= 80; k++) {
         const id = -ImaxMap * (k / 80);
         const denom = lamF + (LdF - LqF) * id;
@@ -1908,15 +1909,16 @@ function GraphsTab({ res, calc, solved }) {
         if (iq < 0 || id * id + iq * iq > ImaxMap * ImaxMap) continue;  // 전류 한계(피크)
         const Vd = Rf * id - we * LqF * iq, Vq = Rf * iq + we * (LdF * id + lamF);
         if (Vd * Vd + Vq * Vq > Vmax * Vmax) continue;                  // 전압 한계
+        feasible = true;                                               // 운전 가능(포락선 내부)
         const Pcu = 1.5 * Rf * (id * id + iq * iq) * kac;              // AC 포함 동손
         if (Pcu < bestPcu) {
           bestPcu = Pcu;
           const fr = feRatio(n), Pfe = res.PfeHyst * fr + res.PfeEddy * fr * fr;
           const Pem = Tt * wm, Pout = Pem - Pfe - calc.otherLoss, Pin = Pem + Pcu;
-          bestEff = Pout > 0 && Pin > 0 ? (Pout / Pin) * 100 : null;
+          bestEff = Pout > 0 && Pin > 0 ? (Pout / Pin) * 100 : 0;       // 손실>출력이면 0 (빈칸 대신 최저색)
         }
       }
-      return bestEff;
+      return feasible ? bestEff : null;                                // 진짜 운전불가만 빈칸
     }));
     return { deg, eW, iW, tq, tAvg, ripple, slotX, m1, mTot, mag, chains,
       tnSpeed, tnTorque, tnPower, tnTorqueP, baseSpeed, tnPmax, opSpeed: calc.speed, opTorque: res.torque,
