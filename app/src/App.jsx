@@ -578,6 +578,11 @@ const NumIn = ({ label, value, onChange, step = 0.01, w = "w-20" }) => (
       style={{ border: "1px solid #C8CFD6", fontFamily: "Consolas,monospace" }} />
   </div>
 );
+const Radio = ({ group, val, label, cur, onPick, disabled }) => (
+  <label className={"flex items-center gap-1.5 text-xs py-0.5 px-2 " + (disabled ? "opacity-40" : "cursor-pointer")}>
+    <input type="radio" name={group} checked={cur === val} disabled={disabled} onChange={() => onPick(val)} />{label}
+  </label>
+);
 const SectionHead = ({ color, children }) => (
   <div className="px-2 py-1 text-xs font-bold" style={{ background: "#E8EBEE", borderLeft: `3px solid ${color}` }}>{children}</div>
 );
@@ -1350,11 +1355,6 @@ function MaterialsTab({ mat, sM, res, showRef }) {
 
 // ─── Calculation 탭 (Motor-CAD Drive 패널) ──────────────────────
 function CalculationTab({ calc, sC, wind, sW, res, solved, setSolved }) {
-  const Radio = ({ group, val, label, cur, onPick, disabled }) => (
-    <label className={"flex items-center gap-1.5 text-xs py-0.5 " + (disabled ? "opacity-40" : "cursor-pointer")}>
-      <input type="radio" name={group} checked={cur === val} disabled={disabled} onChange={() => onPick(val)} />{label}
-    </label>
-  );
   const Box = ({ title, children }) => (
     <fieldset className="rounded px-2 pb-1.5 pt-0.5 mb-2" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
       <legend className="text-xs px-1 font-semibold" style={{ color: "#2A3540" }}>{title}</legend>
