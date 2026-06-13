@@ -797,20 +797,28 @@ function packConductors(geo, wind) {
   };
   const pitch = wind.wireDia + sep;
   const targetSide = wind.turnsPerCoil * wind.strands;
-  // 가로 행(일정 반경) 육각 정렬: 행마다 반 피치 엇갈려 아래 두 가닥 사이 골에 포개짐.
-  // 디바이더에서 치 벽까지 채워 슬롯 테이퍼를 따라 위로 갈수록 넓어짐 (Motor-CAD 단면처럼).
   const rowH = pitch * Math.sqrt(3) / 2;
-  const packSide = (side) => {
+  // 치 벽에 평행한 행으로 채운다: 첫 행이 벽에 밀착(개구→백아이언 방향),
+  // 행마다 안쪽(디바이더 쪽)으로 rowH씩 + 반 피치 육각 엇갈림.
+  // → 비스듬한 치 벽(테이퍼)을 따라 빈틈없이 채워짐 (Motor-CAD 단면 방식).
+  const packSide = (s) => {
+    const uwx = cD, uwy = s * sD;                          // 벽 방향(개구→백아이언) 단위벡터
+    const nx = sD, ny = -s * cD;                           // 벽→디바이더 안쪽 법선 단위벡터
+    const bx0 = xMin, by0 = s * (sD * xMin - wallLim) / cD; // 개구쪽 치 벽 시작점
     const cells = [];
-    for (let i = 0; ; i++) {
-      const x = xMin + r + i * rowH;
-      if (x > RdL - r) break;
-      const off = (i % 2) * (pitch / 2);     // 육각 엇갈림
-      for (let j = 0, hit = false; j < 80; j++) {
-        const y = side * (divHalf + r + sep / 2 + off + j * pitch);
-        if (ok(x, y)) { cells.push([x, y]); hit = true; }
-        else if (hit) break;                 // 치 벽 넘으면 이 행 종료
+    for (let m = 0; m < 120; m++) {
+      const dist = r + 1e-4 + m * rowH;                    // 벽으로부터 수직거리(첫 행은 벽 밀착)
+      const ox = bx0 + dist * nx, oy = by0 + dist * ny;
+      const tStart = (m % 2) * (pitch / 2);                // 육각 엇갈림
+      let any = false;
+      for (let j = 0; j < 240; j++) {
+        const t = tStart + j * pitch;
+        const x = ox + t * uwx, y = oy + t * uwy;
+        if (x > RdL + r) break;                            // 백아이언 넘음 → 행 종료
+        if (ok(x, y) && s * y > 0) { cells.push([x, y]); any = true; } // 자기 절반만(디바이더 넘지 않음)
+        else if (any) break;                               // 디바이더/반대 끝 넘음 → 행 종료
       }
+      if (dist > RdL) break;                               // 안전 종료
     }
     return cells;
   };
