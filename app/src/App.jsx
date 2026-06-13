@@ -475,7 +475,8 @@ function compute(G, W, M, C) {
   const deltaSkin = Math.sqrt(rho / (Math.PI * fe * MU0));            // 표피깊이 [m]
   const xiAC = (W.copperDia * 1e-3) / deltaSkin;                     // 환산높이 ξ = d/δ
   const mLayer = Math.max(1, Math.round(out.windingDepth / W.wireDia)); // 슬롯깊이 방향 도체 층수
-  out.RacRdc = 1 + C.cAC * (((mLayer * mLayer - 1) / 3) * (xiAC ** 4 / 3) + (4 / 45) * xiAC ** 4);
+  const cAC = Number.isFinite(C.cAC) ? C.cAC : 1;                    // 빈칸/미정의 방어
+  out.RacRdc = 1 + cAC * (((mLayer * mLayer - 1) / 3) * (xiAC ** 4 / 3) + (4 / 45) * xiAC ** 4);
   out.PcuAC = out.Pcu * out.RacRdc;        // 총 동손(AC 포함)
   out.PcuAddl = out.Pcu * (out.RacRdc - 1); // AC 추가분
 
