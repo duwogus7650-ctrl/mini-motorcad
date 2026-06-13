@@ -1180,23 +1180,27 @@ function CalculationTab({ calc, sC, wind, sW, res, solved, setSolved }) {
           <Radio group="cdef" val="rms" label="RMS" cur={calc.currentDef} onPick={(v) => sC("currentDef", v)} />
           <div className="mt-1" />
           {calc.currentDef === "peak" ? (
-            <NumIn label="Peak Current [A]" value={+(IlinePk.toFixed(2))} step={0.1} onChange={(v) => sC("IlineRms", v / Math.SQRT2)} />
+            <NumIn label="Line Current — Peak [A]" value={+(IlinePk.toFixed(2))} step={0.1} onChange={(v) => sC("IlineRms", v / Math.SQRT2)} />
           ) : (
             <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA", background: "#F6F8FA" }}>
-              <span className="text-xs" style={{ color: "#8893A0" }}>Peak Current [A]</span>
+              <span className="text-xs" style={{ color: "#8893A0" }}>Line Current — Peak [A]</span>
               <span className="text-xs" style={{ fontFamily: "Consolas,monospace" }}>{IlinePk.toFixed(2)}</span>
             </div>
           )}
           {calc.currentDef === "rms" ? (
-            <NumIn label="RMS Current [A]" value={calc.IlineRms} step={0.1} onChange={(v) => sC("IlineRms", v)} />
+            <NumIn label="Line Current — RMS [A]" value={calc.IlineRms} step={0.1} onChange={(v) => sC("IlineRms", v)} />
           ) : (
             <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA", background: "#F6F8FA" }}>
-              <span className="text-xs" style={{ color: "#8893A0" }}>RMS Current [A]</span>
+              <span className="text-xs" style={{ color: "#8893A0" }}>Line Current — RMS [A]</span>
               <span className="text-xs" style={{ fontFamily: "Consolas,monospace" }}>{calc.IlineRms.toFixed(2)}</span>
             </div>
           )}
           <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA", background: "#F6F8FA" }}>
-            <span className="text-xs" style={{ color: "#8893A0" }}>RMS Current Density</span>
+            <span className="text-xs" style={{ color: "#8893A0" }}>Phase Current (RMS)</span>
+            <span className="text-xs" style={{ fontFamily: "Consolas,monospace", fontWeight: 600 }}>{res ? res.IphRms.toFixed(2) : "—"} A</span>
+          </div>
+          <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA", background: "#F6F8FA" }}>
+            <span className="text-xs" style={{ color: "#8893A0" }}>Phase Current Density (RMS)</span>
             <span className="text-xs" style={{ fontFamily: "Consolas,monospace" }}>{res ? res.Jrms.toFixed(3) : "—"} A/mm²</span>
           </div>
           <NumIn label="DC Bus Voltage [V]" value={calc.Vdc} step={1} onChange={(v) => sC("Vdc", v)} />
@@ -1649,28 +1653,21 @@ function WindingLayout({ geo, res }) {
     marks.push(marker(Rret, ar, c.sign < 0, col, "r" + idx));
   });
 
-  // 상별 직렬 경로 (코일 순서대로 연결) + IN/OUT 단자 — 개략 schematic
-  const series = [], terms = [];
+  // 상별 IN/OUT 단자 표기 (직렬 연결선은 제거 — 원래 배치도로 원복)
+  const terms = [];
   (ph < 0 ? [0, 1, 2] : [ph]).forEach((p) => {
     const pc = wa.coils.filter((c) => c.phase === p).slice().sort((a, b) => a.go - b.go);
     const col = cols[p];
-    for (let i = 0; i + 1 < pc.length; i++) {
-      const a1 = ang(pc[i].ret), a2 = ang(pc[i + 1].go);
-      const [x1c, y1c] = PR(RoL * 1.10, a1), [x2c, y2c] = PR(RoL * 1.10, a2);
-      let am = (a1 + a2) / 2; if (Math.abs(a2 - a1) > Math.PI) am += Math.PI;
-      const [mx, my] = PR(RoL * 1.32, am);
-      series.push(<path key={`c${p}_${i}`} d={`M${x1c.toFixed(1)},${y1c.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${x2c.toFixed(1)},${y2c.toFixed(1)}`}
-        fill="none" stroke={col} strokeWidth="1.7" strokeDasharray="5 3" opacity="0.95" />);
-    }
     if (pc.length) {
       const lbl = ["U", "V", "W"][p];
-      [[pc[0].go, "1"], [pc[pc.length - 1].ret, "2"]].forEach(([slot, suf], j) => {
+      [[pc[0].go, "1", "In"], [pc[pc.length - 1].ret, "2", "Out"]].forEach(([slot, suf, io], j) => {
         const a = ang(slot);
         const [sx, sy] = PR(RoL * 1.04, a), [ex, ey] = PR(RoL * 1.40, a);
         terms.push(<g key={`t${p}_${j}`}>
-          <line x1={sx} y1={sy} x2={ex} y2={ey} stroke={col} strokeWidth="2.2" />
-          <circle cx={ex} cy={ey} r="3.8" fill={col} />
-          <text x={ex} y={ey - 6} fontSize="11" fontWeight="bold" fill={col} textAnchor="middle">{lbl + suf}</text>
+          <line x1={sx} y1={sy} x2={ex} y2={ey} stroke={col} strokeWidth="2.4" />
+          <circle cx={ex} cy={ey} r="4" fill={col} />
+          <text x={ex} y={ey - 7} fontSize="11" fontWeight="bold" fill={col} textAnchor="middle">{lbl + suf}</text>
+          <text x={ex} y={ey + 13} fontSize="9" fill={col} textAnchor="middle">{io}</text>
         </g>);
       });
     }
@@ -1688,7 +1685,7 @@ function WindingLayout({ geo, res }) {
         <span className="text-xs font-semibold mr-1" style={{ color: "#2A3540" }}>상 표시:</span>
         <Btn v={-1} label="전체" /><Btn v={0} label="Ph1" /><Btn v={1} label="Ph2" /><Btn v={2} label="Ph3" />
         <div className="flex-1" />
-        <span className="text-xs" style={{ color: "#8893A0" }}>× 들어감 · • 나옴 · 실선=엔드턴 · 점선=직렬연결 · U1/U2·V1/V2·W1/W2=단자</span>
+        <span className="text-xs" style={{ color: "#8893A0" }}>× 들어감 · • 나옴 · 실선=엔드턴 · U1/V1/W1=In(상 시작) · U2/V2/W2=Out(상 끝)</span>
       </div>
       <div className="flex-1 flex items-center justify-center min-h-0 overflow-auto" style={{ background: "#fff" }}>
         <svg width={size} height={size}>
@@ -1698,7 +1695,6 @@ function WindingLayout({ geo, res }) {
           <circle cx={C} cy={C} r={Rro * sc} fill="#CFF3F3" stroke="#0E8C8C" strokeWidth="0.8" />
           {magPaths.map((d, i) => <path key={"m" + i} d={d} fill="#CDE8CD" stroke="#1E7A1E" strokeWidth="0.4" />)}
           <circle cx={C} cy={C} r={Rsh * sc} fill="#fff" stroke="#0E8C8C" strokeWidth="0.8" />
-          {series}
           {arcs}
           {marks}
           {terms}
