@@ -796,26 +796,19 @@ function packConductors(geo, wind) {
     return true;
   };
   const pitch = wind.wireDia + sep;
-  const colSp = pitch * Math.sqrt(3) / 2;    // 육각 나란히 포갬 (실제 와이어 nesting)
   const targetSide = wind.turnsPerCoil * wind.strands;
-  // 기계권선: 치 벽과 평행한 컬럼으로 벽 → 디바이더(중심) 방향으로 정렬 충전
-  // side=+1 → +y 벽, side=-1 → -y 벽. 벽쪽 컬럼부터 채워 미달 시 중심이 비도록(녹색).
+  // 정렬된 사각 격자: 일정 반경의 가로 행 × 디바이더 기준 세로 열. 개구(아래)→바닥(위)으로
+  // 한 층씩 가지런히 (기계 레이어권선). 행·열이 반듯하게 맞아 벽쪽 들쭉날쭉함이 없음.
   const packSide = (side) => {
-    const inx = sD, iny = side > 0 ? -cD : cD;             // 벽 → 슬롯 안쪽 단위벡터
-    const wy = (t) => (side > 0 ? sD * t - wallLim : wallLim - sD * t) / cD; // 벽선 위 점의 y
-    // 치 벽과 평행한 육각 격자: 벽쪽 컬럼(col=0)부터 디바이더 쪽으로, 각 컬럼은 개구→바닥 순.
-    // 홀수 컬럼은 반 피치 엇갈려 아래 두 가닥 사이 골에 포개짐. 자기 절반(부호)만.
     const cells = [];
-    for (let col = 0; col < 60; col++) {
-      const perp = r + col * colSp, aoff = (col % 2) * (pitch / 2);
-      let any = false;
-      for (let k = 0; k < 300; k++) {
-        const t = xMin + aoff * cD + k * pitch * cD;
-        if (t > RdL + 2) break;
-        const x = t + perp * inx, y = wy(t) + perp * iny;
-        if (ok(x, y) && (side > 0 ? y > 0 : y < 0)) { cells.push([x, y]); any = true; }
+    for (let i = 0; ; i++) {
+      const x = xMin + r + i * pitch;
+      if (x > RdL - r) break;
+      for (let j = 0, hit = false; j < 80; j++) {
+        const y = side * (divHalf + r + sep / 2 + j * pitch);
+        if (ok(x, y)) { cells.push([x, y]); hit = true; }
+        else if (hit) break;             // 치 벽 넘으면 이 행 종료
       }
-      if (!any && col > 1) break;          // 디바이더 넘어 빈 컬럼이면 종료
     }
     return cells;
   };
