@@ -582,12 +582,20 @@ const SectionHead = ({ color, children }) => (
   <div className="px-2 py-1 text-xs font-bold" style={{ background: "#E8EBEE", borderLeft: `3px solid ${color}` }}>{children}</div>
 );
 
+// 열등가회로 기본값 (집중정수, 정상상태). hConv: 자연대류 기본 10 W/m²K. housing 0 = 형상에서 자동.
+const THERM0 = {
+  ambient: 25, coolType: "natural", hConv: 10, hContact: 1000,
+  housingDia: 0, housingLen: 0, kLiner: 0.2, kImpreg: 0.25, kSteel: 25,
+};
+const COOL_H = { natural: 10, forced: 60, conduction: 200 };
+
 export default function MiniMotorCad() {
   const [tab, setTab] = useState("geometry");
   const [geo, setGeo] = useState(GEO0);
   const [wind, setWind] = useState(WIND0);
   const [mat, setMat] = useState(MAT0);
   const [calc, setCalc] = useState(CALC0);
+  const [therm, setTherm] = useState(THERM0);
   const [showRef, setShowRef] = useState(true);
 
   // 입력 도중(빈 칸→0 등) NaN/Infinity가 나오면 마지막 유효 결과를 유지
@@ -610,6 +618,7 @@ export default function MiniMotorCad() {
   const sW = (k, v) => setWind((p) => ({ ...p, [k]: v }));
   const sM = (k, v) => setMat((p) => ({ ...p, [k]: v }));
   const sC = (k, v) => setCalc((p) => ({ ...p, [k]: v }));
+  const sT = (k, v) => setTherm((p) => ({ ...p, [k]: v }));
 
   const exportAll = () => {
     const data = { geometry: geo, winding: wind, materials: mat, calculation: calc, results: res };
@@ -620,7 +629,7 @@ export default function MiniMotorCad() {
 
   const TABS = [
     ["geometry", "Geometry"], ["winding", "Winding"], ["materials", "Materials"],
-    ["calculation", "Calculation"], ["output", "Output Data"], ["graphs", "Graphs"],
+    ["calculation", "Calculation"], ["output", "Output Data"], ["graphs", "Graphs"], ["thermal", "Thermal"],
   ];
 
   return (
@@ -662,6 +671,7 @@ export default function MiniMotorCad() {
         {tab === "calculation" && <CalculationTab calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} />}
         {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} solved={solved} />}
         {tab === "graphs" && <GraphsTab res={res} calc={calc} solved={solved} />}
+        {tab === "thermal" && <ThermalTab geo={geo} wind={wind} calc={calc} res={res} therm={therm} sT={sT} solved={solved} />}
       </div>
     </div>
   );
@@ -1966,6 +1976,104 @@ function GraphsTab({ res, calc, solved }) {
         env={{ x: data.tnSpeed, y: data.tnTorqueP }} op={{ speed: data.opSpeed, torque: data.opTorque }} />
       <div className="w-full text-xs" style={{ color: "#8893A0" }}>
         모든 파형은 해석식 합성 추정치 — 슬롯팅·포화·코깅 미반영. 정밀 파형은 Motor-CAD/Maxwell FEA로 검증.
+      </div>
+    </div>
+  );
+}
+
+// ─── Thermal 탭 (집중정수 열등가회로 — 권선 포화온도 예측) ───────
+function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
+  const data = useMemo(() => {
+    if (!res) return null;
+    const a = 0.003862;
+    const rhoRatio = (Tc) => (1 + a * (Tc - 20)) / (1 + a * (calc.Tcu - 20));
+    const Lstk = geo.stackLength * 1e-3, Ns = geo.slotNumber;
+    const linedLen = (res.linerArea / Math.max(wind.linerThk, 1e-6)) * 1e-3;          // m/슬롯
+    const Awall = Math.max(linedLen * Lstk * Ns, 1e-5);                                // 권선↔철심 접촉면
+    const Dh = (therm.housingDia > 0 ? therm.housingDia : geo.statorLamDia + 8) * 1e-3;
+    const Lh = (therm.housingLen > 0 ? therm.housingLen : geo.motorLength) * 1e-3;
+    const Ahouse = Math.PI * Dh * Lh + 2 * (Math.PI / 4 * Dh * Dh);                     // 하우징 외표면
+    const Aint = Math.PI * (geo.statorLamDia * 1e-3) * Lstk;                            // 철심↔하우징 계면
+    const Rslot = (wind.linerThk * 1e-3 / therm.kLiner + 0.5e-3 / therm.kImpreg) / Awall;
+    const Ryoke = 1 / (therm.hContact * Aint) + (res.byDepth * 1e-3) / (therm.kSteel * Aint);
+    const Rconv = 1 / (therm.hConv * Ahouse);
+    const solve = (Pfe, other, kac) => {                                               // 정상상태 + 열-전기 반복
+      let Tw = calc.Tcu;
+      for (let i = 0; i < 40; i++) {
+        const Pcu = res.Pcu * rhoRatio(Tw) * kac, Q = Pcu + Pfe + other;
+        const Th = therm.ambient + Q * Rconv, Tc = Th + Q * Ryoke, Twn = Tc + Pcu * Rslot;
+        if (Math.abs(Twn - Tw) < 0.01) { Tw = Twn; break; } Tw = Twn;
+      }
+      const Pcu = res.Pcu * rhoRatio(Tw) * kac, Q = Pcu + Pfe + other;
+      const Th = therm.ambient + Q * Rconv, Tc = Th + Q * Ryoke;
+      return { Tw, Tc, Th, Q, Pcu };
+    };
+    const op = solve(res.Pfe, calc.otherLoss, res.RacRdc || 1);
+    const nMax = res.noLoadSpeed * 1.6, NPT = 60, kacR = (res.RacRdc || 1) - 1, nR = Math.max(calc.speed, 1);
+    const spd = [], temp = [];
+    for (let i = 0; i <= NPT; i++) {
+      const n = (nMax * i) / NPT, fr = n / nR;
+      const Pfe_n = res.PfeHyst * fr + res.PfeEddy * Math.pow(fr, 1.8), other_n = calc.otherLoss * fr;
+      spd.push(n); temp.push(solve(Pfe_n, other_n, 1 + kacR * fr * fr).Tw);
+    }
+    return { op, Rslot, Ryoke, Rconv, Ahouse, Aint, Dh: Dh * 1e3, Lh: Lh * 1e3, spd, temp, Tsat: temp[temp.length - 1] };
+  }, [geo, wind, calc, res, therm]);
+  if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 누른 뒤 표시됩니다 (손실값 필요).</div>;
+  if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
+  const Row = ({ k, v, u, c }) => (
+    <div className="flex items-center justify-between px-2 py-1 text-xs" style={{ borderTop: "1px solid #E2E6EA" }}>
+      <span style={{ color: "#5C6B7A" }}>{k}</span>
+      <span style={{ fontFamily: "Consolas,monospace", fontWeight: 600, color: c || "#1A222C" }}>{v}{u && <span style={{ color: "#8893A0", fontWeight: 400 }}> {u}</span>}</span>
+    </div>
+  );
+  const setCool = (t) => { sT("coolType", t); sT("hConv", COOL_H[t]); };
+  return (
+    <div className="flex h-full overflow-auto gap-3 p-3 items-start">
+      <div className="w-72 flex-shrink-0">
+        <fieldset className="rounded mb-2" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
+          <legend className="text-xs font-bold px-1 ml-2" style={{ color: "#2A3540" }}>냉각 / 하우징</legend>
+          <div className="text-xs font-semibold px-2 mt-1">냉각 방식:</div>
+          <Radio group="cool" val="natural" label="자연대류 (h≈10)" cur={therm.coolType} onPick={setCool} />
+          <Radio group="cool" val="forced" label="강제공냉 (h≈60)" cur={therm.coolType} onPick={setCool} />
+          <Radio group="cool" val="conduction" label="전도방열 (h≈200)" cur={therm.coolType} onPick={setCool} />
+          <NumIn label="대류계수 h [W/m²K]" value={therm.hConv} step={1} onChange={(v) => sT("hConv", v)} />
+          <NumIn label="주위온도 [°C]" value={therm.ambient} step={1} onChange={(v) => sT("ambient", v)} />
+          <NumIn label={"하우징 외경 [mm] (0=자동 " + (geo.statorLamDia + 8) + ")"} value={therm.housingDia} step={1} onChange={(v) => sT("housingDia", v)} />
+          <NumIn label={"하우징 길이 [mm] (0=자동 " + geo.motorLength + ")"} value={therm.housingLen} step={1} onChange={(v) => sT("housingLen", v)} />
+          <NumIn label="계면 접촉계수 [W/m²K]" value={therm.hContact} step={100} onChange={(v) => sT("hContact", v)} />
+          <NumIn label="라이너 열전도 k [W/mK]" value={therm.kLiner} step={0.05} onChange={(v) => sT("kLiner", v)} />
+          <NumIn label="함침 열전도 k [W/mK]" value={therm.kImpreg} step={0.05} onChange={(v) => sT("kImpreg", v)} />
+        </fieldset>
+        <div className="text-xs px-1" style={{ color: "#8893A0" }}>집중정수 추정 · 자연대류 텍스트북 기본값. 절대값은 열 측정/FEA로 보정.</div>
+      </div>
+      <div className="w-80 flex-shrink-0">
+        <div className="rounded" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>정상상태 결과 (정격 운전점)</div>
+          <div className="px-3 py-3 text-center" style={{ background: "#FBF4EC" }}>
+            <div className="text-xs" style={{ color: "#8893A0" }}>권선 포화온도 (예측)</div>
+            <div style={{ fontSize: 30, fontWeight: 700, color: data.op.Tw > 130 ? "#B02020" : "#1B5E20", fontFamily: "Consolas,monospace" }}>{data.op.Tw.toFixed(1)} °C</div>
+          </div>
+          <Row k="권선 (Cu)" v={data.op.Tw.toFixed(1)} u="°C" c="#B02020" />
+          <Row k="철심 (Fe)" v={data.op.Tc.toFixed(1)} u="°C" />
+          <Row k="하우징" v={data.op.Th.toFixed(1)} u="°C" />
+          <Row k="주위" v={therm.ambient.toFixed(1)} u="°C" />
+          <Row k="총 발열 Q" v={data.op.Q.toFixed(1)} u="W" />
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderTop: "2px solid #D5DBE1", background: "#F1F4F6" }}>열저항</div>
+          <Row k="권선→철심 R_slot" v={data.Rslot.toFixed(3)} u="K/W" />
+          <Row k="철심→하우징 R_yoke" v={data.Ryoke.toFixed(3)} u="K/W" />
+          <Row k="하우징→공기 R_conv" v={data.Rconv.toFixed(3)} u="K/W" />
+          <Row k="하우징 외표면" v={(data.Ahouse * 1e4).toFixed(0)} u="cm²" />
+        </div>
+        {data.op.Tw > 130 && <div className="text-xs mt-1 px-1" style={{ color: "#B02020" }}>⚠ 권선온도 과다 — 이 냉각방식으론 연속정격 불가. 강제공냉/전도방열 또는 하우징 확대 필요.</div>}
+        {Math.abs(data.op.Tw - calc.Tcu) > 8 && <div className="text-xs mt-1 px-1" style={{ color: "#B5622D" }}>예측 권선온도 {data.op.Tw.toFixed(0)}°C ≠ 입력 {calc.Tcu}°C. 정밀화하려면 Calculation의 Armature Winding Temp를 {data.op.Tw.toFixed(0)}로 맞추고 재Solve.</div>}
+      </div>
+      <div className="flex-1 min-w-0">
+        <Plot title="포화온도–속도 곡선" sub={"정격전류 연속운전 · 포화온도(@" + Math.round(data.spd[data.spd.length - 1]) + "rpm) " + data.Tsat.toFixed(1) + "°C"}
+          h={300} series={[
+            { x: data.spd, y: data.temp, color: "#B02020", label: "Coil Temp [°C]" },
+            { x: [calc.speed, calc.speed], y: [therm.ambient, data.op.Tw], color: "#D98E04", label: "정격속도" },
+          ]} />
+        <div className="text-xs mt-1 px-1" style={{ color: "#8893A0" }}>속도별 정상상태 권선온도 (손실 속도외삽 + 열-전기 반복). Motor-CAD 포화온도 예측곡선 대응 (추정).</div>
       </div>
     </div>
   );
