@@ -820,10 +820,8 @@ function GeometryTab({ geo, sG, res }) {
   const runExtract = (shapes) => {
     const ex = extractGeometry(shapes);
     if (!ex) { alert("형상을 추출할 수 없습니다 (원/닫힌 폴리라인 없음)."); return; }
-    // 축 정렬: 슬롯을 +X축에 맞추도록 DXF를 −statorRot 회전(중심 유지) → 회전각 0 정규화
-    const rot = -ex.statorRot, rad = rot * D2R, c = Math.cos(rad), s = Math.sin(rad);
-    const rx = ex.cx * c - ex.cy * s, ry = ex.cx * s + ex.cy * c;
-    setDxfT({ scale: ex.unit, rot, dx: -ex.unit * rx, dy: -ex.unit * ry });
+    // 회전 자동 정렬은 하지 않음 — 표시 중심정렬만(회전 0). 회전각은 사용자가 직접 맞춤.
+    setDxfT({ scale: ex.unit, rot: 0, dx: -ex.unit * ex.cx, dy: -ex.unit * ex.cy });
     const applied = [];
     const put = (k, v, lo, hi, dec = 2) => { if (isFinite(v) && v > lo && v < hi) { sG(k, +v.toFixed(dec)); applied.push(k); } };
     put("statorLamDia", ex.statorLamDia, 5, 2000);
@@ -831,11 +829,8 @@ function GeometryTab({ geo, sG, res }) {
     put("shaftDia", ex.shaftDia, 1, ex.statorBore || 1e9);
     if (ex.slotCount >= 3 && ex.slotCount <= 90) { sG("slotNumber", ex.slotCount); applied.push("slotNumber"); }
     if (ex.poleCount >= 2 && ex.poleCount <= 80) { sG("poleNumber", ex.poleCount); applied.push("poleNumber"); }
-    // 에어갭은 자동 적용 안 함: 큰 두 반경의 차(0.5mm)라 DXF 검출오차에 매우 민감 → 토크 왜곡.
-    // 추출값은 참고로만 표시하고 사용자가 실제값(보통 0.5)을 유지/입력하도록 둠.
-    sG("statorRot", 0); applied.push("statorRot");          // 정렬했으므로 0
-    sG("rotorRot", +(ex.rotorRot - ex.statorRot).toFixed(1)); applied.push("rotorRot");
-    setAutoInfo({ ...ex, applied, aligned: true });
+    // 에어갭·회전각은 자동 적용 안 함 (검출오차 민감 / 사용자 직접 정렬). 추출값은 리포트에 참고 표시.
+    setAutoInfo({ ...ex, applied });
   };
   const exportAlignedDxf = () => {
     if (!dxf) { alert("먼저 DXF를 불러오세요."); return; }
@@ -880,12 +875,12 @@ function GeometryTab({ geo, sG, res }) {
           </div>
           <button onClick={autoExtract} className="text-xs px-2 py-1.5 rounded text-white font-medium"
             style={{ background: "#1B7A2B", cursor: "pointer" }}>
-            ⚙ 자동 정렬·형상 추출{!dxf && " (DXF 선택)"}
+            ⚙ 형상 추출 (치수·슬롯/극수){!dxf && " · DXF 선택"}
           </button>
           {dxf && (
             <button onClick={exportAlignedDxf} className="text-xs px-2 py-1 rounded font-medium"
               style={{ border: "1px solid #1B7A2B", color: "#1B7A2B", background: "#fff", cursor: "pointer" }}>
-              ⬇ 정렬 DXF 내보내기
+              ⬇ DXF 내보내기 (현재 정렬)
             </button>
           )}
           {autoInfo && (
@@ -893,8 +888,7 @@ function GeometryTab({ geo, sG, res }) {
               <div className="font-bold mb-0.5" style={{ color: "#1B7A2B" }}>추출 결과 (단위 ×{autoInfo.unit})</div>
               <div>OD {autoInfo.statorLamDia} · 보어 {autoInfo.statorBore} · 샤프트 {autoInfo.shaftDia || "—"}</div>
               <div>슬롯 {autoInfo.slotCount || "?"} · 극 {autoInfo.poleCount || "?"}</div>
-              <div style={{ color: "#B5622D" }}>에어갭(추정) {autoInfo.airgap || "?"} — 미적용, 실제값 직접 입력</div>
-              <div>회전 stator {autoInfo.statorRot}° · rotor {autoInfo.rotorRot}°</div>
+              <div style={{ color: "#B5622D" }}>에어갭(추정) {autoInfo.airgap || "?"} · 회전(추정) S{autoInfo.statorRot}°/R{autoInfo.rotorRot}° — 미적용, 직접 입력/정렬</div>
               <div style={{ color: "#5C6B7A" }}>동심원 Ø: {autoInfo.dias.join(", ") || "없음"}</div>
               <div style={{ color: "#5C6B7A" }}>폴리 외측 {autoInfo.outerN}→슬롯 {autoInfo.slotCount} · 내측 {autoInfo.innerN}→극 {autoInfo.poleCount} · 폴리보어 {autoInfo.borePoly || "—"}</div>
               <div style={{ color: "#8893A0", marginTop: 2 }}>적용 {autoInfo.applied.length}개 — 오버레이 확인 후 미세조정</div>
@@ -1710,6 +1704,26 @@ function jetColor(t) {
   const b = Math.min(Math.max(1.5 - Math.abs(4 * t - 1), 0), 1);
   return `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
 }
+// marching-squares: grid[j][i]=(xs[i],ys[j])에서 level 등치선 선분들
+function contourSegs(grid, xs, ys, level) {
+  const segs = [];
+  for (let j = 0; j < ys.length - 1; j++) for (let i = 0; i < xs.length - 1; i++) {
+    const c = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]];
+    if (c[0] == null || c[1] == null || c[2] == null || c[3] == null) continue;
+    const xa = [xs[i], xs[i + 1], xs[i + 1], xs[i]], ya = [ys[j], ys[j], ys[j + 1], ys[j + 1]];
+    const pts = [];
+    for (let e = 0; e < 4; e++) {
+      const a = c[e], b = c[(e + 1) % 4];
+      if ((a > level) !== (b > level)) {
+        const t = (level - a) / (b - a);
+        pts.push([xa[e] + (xa[(e + 1) % 4] - xa[e]) * t, ya[e] + (ya[(e + 1) % 4] - ya[e]) * t]);
+      }
+    }
+    if (pts.length >= 2) segs.push([pts[0], pts[1]]);
+    if (pts.length === 4) segs.push([pts[2], pts[3]]);
+  }
+  return segs;
+}
 function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
   const Wp = 560, P = { l: 52, r: 82, t: 12, b: 26 };
   const flat = grid.flat().filter((v) => v != null);
@@ -1732,6 +1746,21 @@ function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
   }
   const envPts = env.x.map((xx, i) => sx(xx) + "," + sy(env.y[i])).join(" ");
   const cbH = h - P.t - P.b;
+  // iso-효율 등고선 (Motor-CAD 식): 정수 효율 레벨마다 선 + 주요 레벨 라벨
+  const contourEls = [], labelEls = [];
+  for (let lv = Math.ceil(lo + 1); lv <= Math.floor(top); lv++) {
+    const segs = contourSegs(grid, speeds, torques, lv);
+    if (!segs.length) continue;
+    const major = lv % 2 === 0 || lv >= top - 3;
+    segs.forEach((sg, si) => contourEls.push(
+      <line key={"c" + lv + "_" + si} x1={sx(sg[0][0]).toFixed(1)} y1={sy(sg[0][1]).toFixed(1)} x2={sx(sg[1][0]).toFixed(1)} y2={sy(sg[1][1]).toFixed(1)}
+        stroke="#1a1a1a" strokeWidth={major ? 0.7 : 0.4} opacity={major ? 0.55 : 0.3} />));
+    if (major) {                                   // 가장 왼쪽 선분에 레벨 라벨
+      let best = segs[0], bx = sx(segs[0][0][0]);
+      segs.forEach((sg) => { const xx = sx(sg[0][0]); if (xx < bx) { bx = xx; best = sg; } });
+      labelEls.push(<text key={"cl" + lv} x={sx(best[0][0]).toFixed(1)} y={sy(best[0][1]).toFixed(1)} fontSize="8.5" fontWeight="bold" fill="#111" stroke="#fff" strokeWidth="0.5" paintOrder="stroke">{lv}</text>);
+    }
+  }
   return (
     <div className="rounded w-full" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
       <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
@@ -1740,6 +1769,8 @@ function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
       <svg width={Wp} height={h} style={{ display: "block" }}>
         <rect x={P.l} y={P.t} width={Wp - P.l - P.r} height={cbH} fill="#1f2540" />
         {cells}
+        {contourEls}
+        {labelEls}
         <polyline fill="none" stroke="#111" strokeWidth="1.8" points={envPts} />
         {op && op.torque <= yMax && <g><circle cx={sx(op.speed)} cy={sy(op.torque)} r="4.5" fill="#fff" stroke="#111" strokeWidth="1.8" />
           <text x={sx(op.speed) + 7} y={sy(op.torque) - 5} fontSize="10" fontWeight="bold" fill="#111">정격</text></g>}
