@@ -26,11 +26,11 @@
 
 # 3차: Motor-CAD 충실도 개선 (2026-06-13, 사용자 피드백)
 
-- [ ] ① 권선 배치도 (Winding Pattern) — 전체 단면에 코일 루프 + go/return(×/•) + 상색상, 상 필터
-- [ ] ② Radial Pattern 표 부호 규약 Motor-CAD에 맞춤
-- [ ] ③ 슬롯 단면 그림 Motor-CAD 스타일 재작업 (정렬된 다발 + 모서리 여백 + 디바이더 간격)
-- [ ] ④ Solve 게이팅 — Solve 눌러야 Output/Graphs 표시 (Motor-CAD 흐름)
-- [ ] 각 단계 commit + build
+- [x] ① 권선 배치도 (Winding Pattern) — 전체 단면에 코일 엔드턴 아크 + go/return(×/•) + 상색상, 상 필터 (Winding 탭 "권선 배치도" 하위탭)
+- [x] ② Radial Pattern 표 부호 규약 Motor-CAD에 맞춤 (절대값 표시 = All Phases)
+- [x] ③ 슬롯 단면 도선 패킹 단정화 (디바이더 정렬 + 개구→바닥) — ※ Motor-CAD 독자 렌더러와 완전일치는 아님, 사용자 추가 피드백 필요
+- [x] ④ Solve 게이팅 — Solve 눌러야 Output/Graphs/성능표 표시, 입력변경 시 무효화
+- [x] 각 단계 commit + build (4 커밋)
 
 ## 2차 Review
 
