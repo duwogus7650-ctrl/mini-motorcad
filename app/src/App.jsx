@@ -483,6 +483,10 @@ export default function MiniMotorCad() {
   const res = rawRes || lastResRef.current;
   const stale = !rawRes && !!res;
 
+  // E-Magnetic 결과는 Solve를 눌러야 표시 (Motor-CAD 흐름). 입력 변경 시 무효화.
+  const [solved, setSolved] = useState(false);
+  useEffect(() => { setSolved(false); }, [geo, wind, mat, calc]);
+
   const sG = (k, v) => setGeo((p) => ({ ...p, [k]: v }));
   const sW = (k, v) => setWind((p) => ({ ...p, [k]: v }));
   const sM = (k, v) => setMat((p) => ({ ...p, [k]: v }));
@@ -536,9 +540,9 @@ export default function MiniMotorCad() {
         {tab === "geometry" && <GeometryTab geo={geo} sG={sG} res={res} />}
         {tab === "winding" && <WindingTab geo={geo} wind={wind} sW={sW} res={res} showRef={showRef} />}
         {tab === "materials" && <MaterialsTab mat={mat} sM={sM} res={res} showRef={showRef} />}
-        {tab === "calculation" && <CalculationTab calc={calc} sC={sC} wind={wind} sW={sW} res={res} />}
-        {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} />}
-        {tab === "graphs" && <GraphsTab res={res} calc={calc} />}
+        {tab === "calculation" && <CalculationTab calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} />}
+        {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} solved={solved} />}
+        {tab === "graphs" && <GraphsTab res={res} calc={calc} solved={solved} />}
       </div>
     </div>
   );
@@ -1147,8 +1151,7 @@ function MaterialsTab({ mat, sM, res, showRef }) {
 }
 
 // ─── Calculation 탭 (Motor-CAD Drive 패널) ──────────────────────
-function CalculationTab({ calc, sC, wind, sW, res }) {
-  const [solved, setSolved] = useState(false);
+function CalculationTab({ calc, sC, wind, sW, res, solved, setSolved }) {
   const Radio = ({ group, val, label, cur, onPick, disabled }) => (
     <label className={"flex items-center gap-1.5 text-xs py-0.5 " + (disabled ? "opacity-40" : "cursor-pointer")}>
       <input type="radio" name={group} checked={cur === val} disabled={disabled} onChange={() => onPick(val)} />{label}
@@ -1225,7 +1228,7 @@ function CalculationTab({ calc, sC, wind, sW, res }) {
       {/* ── Col 3: Performance ── */}
       <div className="w-80 flex-shrink-0">
         <Box title="Performance Tests — Single Operating Point">
-          {res && (
+          {solved && res ? (
             <table className="w-full"><tbody>
               <Row label="Average Torque" value={res.torque.toFixed(4)} unit="Nm" hl />
               <Row label="Output Power" value={res.Pout.toFixed(1)} unit="W" />
@@ -1234,23 +1237,28 @@ function CalculationTab({ calc, sC, wind, sW, res }) {
               <Row label="Phase Current (rms)" value={res.IphRms.toFixed(2)} unit="A" />
               <Row label="Fundamental Freq" value={res.fe.toFixed(1)} unit="Hz" />
             </tbody></table>
+          ) : (
+            <div className="text-xs py-4 text-center" style={{ color: "#8893A0" }}>
+              아래 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하세요.
+            </div>
           )}
         </Box>
         <button
-          onClick={() => { setSolved(true); setTimeout(() => setSolved(false), 1200); }}
+          onClick={() => setSolved(true)}
           className="w-full py-3 rounded font-semibold text-sm"
           style={{ border: "1px solid #1A222C", background: solved ? "#1B7A2B" : "#fff", color: solved ? "#fff" : "#1A222C" }}>
-          {solved ? "✓ 계산 완료 (실시간)" : "Solve E-Magnetic Model"}
+          {solved ? "✓ 해석 완료 — Output Data / Graphs 확인" : "Solve E-Magnetic Model"}
         </button>
-        <div className="text-xs mt-1.5" style={{ color: "#8893A0" }}>해석식 엔진은 입력 변경 시 항상 즉시 재계산됩니다.</div>
+        <div className="text-xs mt-1.5" style={{ color: "#8893A0" }}>해석식(closed-form) 엔진 — Solve 시 즉시 계산됩니다. 입력을 바꾸면 다시 Solve 해야 합니다.</div>
       </div>
     </div>
   );
 }
 
 // ─── Output Data 탭 (Motor-CAD 하위탭 구조) ─────────────────────
-function OutputTab({ res, calc, showRef }) {
+function OutputTab({ res, calc, showRef, solved }) {
   const [sub, setSub] = useState("drive");
+  if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하면 결과가 표시됩니다.</div>;
   if (!res) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
   const f = (v, d = 3) => Number(v).toFixed(d);
   const SUBS = [["drive", "Drive"], ["emag", "E-Magnetics"], ["flux", "Flux Densities"], ["loss", "Losses"], ["wdg", "Winding"], ["matl", "Materials"]];
@@ -1505,7 +1513,7 @@ function PhasorPlot({ chains }) {
   );
 }
 
-function GraphsTab({ res, calc }) {
+function GraphsTab({ res, calc, solved }) {
   const data = useMemo(() => {
     if (!res) return null;
     const N = 241;
@@ -1557,6 +1565,7 @@ function GraphsTab({ res, calc }) {
     });
     return { deg, eW, iW, tq, tAvg, ripple, slotX, m1, mTot, mag, chains };
   }, [res, calc]);
+  if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하면 파형이 표시됩니다.</div>;
   if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
   return (
     <div className="h-full overflow-auto p-3 flex flex-wrap gap-3" style={{ alignContent: "flex-start" }}>
