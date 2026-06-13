@@ -796,22 +796,34 @@ function packConductors(geo, wind) {
     return true;
   };
   const pitch = wind.wireDia + sep;
-  const rowH = pitch * Math.sqrt(3) / 2;
+  const colSp = pitch * Math.sqrt(3) / 2;
   const targetSide = wind.turnsPerCoil * wind.strands;
-  const left = [], right = [];
-  let row = 0;
-  // 개구(아래)→슬롯바닥(위)으로 채우고, 각 행은 디바이더 쪽부터 벽쪽으로 (안쪽 모서리 정렬)
-  for (let x = xMin + r; x <= RdL - r + 1e-9; x += rowH, row++) {
-    const off = (row % 2) * pitch / 2;
-    const rowR = [], rowL = [];
-    for (let y = divHalf + r + sep / 2 + off; y <= RdL; y += pitch) {
-      if (ok(x, y)) rowR.push([x, y]);
-      if (ok(x, -y)) rowL.push([x, -y]);
+  // 기계권선: 치 벽과 평행한 컬럼으로 벽 → 디바이더(중심) 방향으로 정렬 충전
+  // side=+1 → +y 벽, side=-1 → -y 벽. 벽쪽 컬럼부터 채워 미달 시 중심이 비도록(녹색).
+  const packSide = (side) => {
+    const inx = sD, iny = side > 0 ? -cD : cD;             // 벽 → 슬롯 안쪽 단위벡터
+    const wy = (t) => (side > 0 ? sD * t - wallLim : wallLim - sD * t) / cD; // 벽선 위 점의 y
+    const cand = [];
+    for (let col = 0; col < 40; col++) {
+      const perp = r + col * colSp, aoff = (col % 2) * (pitch / 2);
+      for (let k = 0; k < 200; k++) {
+        const t = xMin + aoff * cD + k * pitch * cD;
+        if (t > RdL + 2) break;
+        const x = t + perp * inx, y = wy(t) + perp * iny;
+        if (ok(x, y)) cand.push([x, y, col, k]);
+      }
     }
-    rowR.sort((a, b) => a[1] - b[1]);   // 디바이더 쪽부터
-    rowL.sort((a, b) => b[1] - a[1]);
-    right.push(...rowR); left.push(...rowL);
-  }
+    // 벽쪽(col↑) → 안쪽 순으로, 겹치지 않는 것만 채택 (정렬된 기계권선 다발)
+    cand.sort((a, b) => a[2] - b[2] || a[3] - b[3]);
+    const acc = [], minD2 = (pitch * 0.98) ** 2;
+    for (const [x, y] of cand) {
+      let free = true;
+      for (const [ax, ay] of acc) { const dx = x - ax, dy = y - ay; if (dx * dx + dy * dy < minD2) { free = false; break; } }
+      if (free) acc.push([x, y]);
+    }
+    return acc;
+  };
+  const right = packSide(1), left = packSide(-1);
   return {
     left: left.slice(0, targetSide), right: right.slice(0, targetSide),
     capacity: Math.min(left.length, right.length), targetSide,
@@ -819,7 +831,7 @@ function packConductors(geo, wind) {
   };
 }
 
-function SlotViewer({ geo, wind }) {
+function SlotViewer({ geo, wind, res }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const pack = useMemo(() => packConductors(geo, wind), [geo, wind]);
@@ -920,6 +932,9 @@ function SlotViewer({ geo, wind }) {
         style={{ background: fit ? "#1A222C" : "#7A1212", color: "#fff", fontFamily: "Consolas,monospace" }}>
         <span>도체 배치: {Math.min(pack.capacity, pack.targetSide)} / {pack.targetSide} (편측) · 슬롯당 {2 * Math.min(pack.capacity, pack.targetSide)}</span>
         {!fit && <span>⚠ 공간 부족 — 슬롯에 {pack.capacity}가닥/측까지만 들어감 (와이어 지름·턴수·라이너 확인)</span>}
+        {res && <span style={{ color: res.cuSlotFill <= 0.30 ? "#7CFC9A" : "#FFC04D" }}>
+          나동선 점적률 {(res.cuSlotFill * 100).toFixed(1)}% · {res.cuSlotFill <= 0.30 ? "기계권선 가능(≤30%)" : "기계권선 한계 초과(>30%)"}
+        </span>}
         <div className="flex-1" />
         <span>라이너 {wind.linerThk} · 웨지 {wind.wedgeDepth} · 디바이더 {wind.coilDivider} · 간격 {wind.condSep}</span>
       </div>
@@ -1029,7 +1044,7 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
             </button>
           ))}
         </div>
-        {windView === "section" ? <SlotViewer geo={geo} wind={wind} /> : <WindingLayout geo={geo} res={res} />}
+        {windView === "section" ? <SlotViewer geo={geo} wind={wind} res={res} /> : <WindingLayout geo={geo} res={res} />}
       </div>
       {/* 우: 패턴/권선계수 */}
       <div className="w-64 overflow-y-auto flex-shrink-0 p-2 flex flex-col gap-3" style={{ background: "#FAFBFC", borderLeft: "1px solid #D5DBE1" }}>
@@ -1604,7 +1619,7 @@ function WindingLayout({ geo, res }) {
   const Rb = geo.statorBore / 2, RoL = geo.statorLamDia / 2;
   const Rro = Rb - geo.airgap, Rsh = geo.shaftDia / 2;
   const size = 540, C = size / 2, margin = 14;
-  const worldR = RoL * 1.3;
+  const worldR = RoL * 1.45;
   const sc = (C - margin) / worldR;
   const cols = ["#CC2222", "#1B7A2B", "#2244CC"];
   const ang = (k) => (k * 2 * Math.PI) / Ns;          // 슬롯 k 중심각
@@ -1643,6 +1658,33 @@ function WindingLayout({ geo, res }) {
     marks.push(marker(Rret, ar, c.sign < 0, col, "r" + idx));
   });
 
+  // 상별 직렬 경로 (코일 순서대로 연결) + IN/OUT 단자 — 개략 schematic
+  const series = [], terms = [];
+  (ph < 0 ? [0, 1, 2] : [ph]).forEach((p) => {
+    const pc = wa.coils.filter((c) => c.phase === p).slice().sort((a, b) => a.go - b.go);
+    const col = cols[p];
+    for (let i = 0; i + 1 < pc.length; i++) {
+      const a1 = ang(pc[i].ret), a2 = ang(pc[i + 1].go);
+      const [x1c, y1c] = PR(RoL * 1.10, a1), [x2c, y2c] = PR(RoL * 1.10, a2);
+      let am = (a1 + a2) / 2; if (Math.abs(a2 - a1) > Math.PI) am += Math.PI;
+      const [mx, my] = PR(RoL * 1.32, am);
+      series.push(<path key={`c${p}_${i}`} d={`M${x1c.toFixed(1)},${y1c.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${x2c.toFixed(1)},${y2c.toFixed(1)}`}
+        fill="none" stroke={col} strokeWidth="1.7" strokeDasharray="5 3" opacity="0.95" />);
+    }
+    if (pc.length) {
+      const lbl = ["U", "V", "W"][p];
+      [[pc[0].go, "1"], [pc[pc.length - 1].ret, "2"]].forEach(([slot, suf], j) => {
+        const a = ang(slot);
+        const [sx, sy] = PR(RoL * 1.04, a), [ex, ey] = PR(RoL * 1.40, a);
+        terms.push(<g key={`t${p}_${j}`}>
+          <line x1={sx} y1={sy} x2={ex} y2={ey} stroke={col} strokeWidth="2.2" />
+          <circle cx={ex} cy={ey} r="3.8" fill={col} />
+          <text x={ex} y={ey - 6} fontSize="11" fontWeight="bold" fill={col} textAnchor="middle">{lbl + suf}</text>
+        </g>);
+      });
+    }
+  });
+
   const Btn = ({ v, label }) => (
     <button onClick={() => setPh(v)} className="text-xs px-2.5 py-1 rounded"
       style={{ border: "1px solid #C8CFD6", background: ph === v ? (v < 0 ? "#1A222C" : cols[v]) : "#fff", color: ph === v ? "#fff" : "#2A3540", fontWeight: ph === v ? 600 : 400 }}>
@@ -1655,7 +1697,7 @@ function WindingLayout({ geo, res }) {
         <span className="text-xs font-semibold mr-1" style={{ color: "#2A3540" }}>상 표시:</span>
         <Btn v={-1} label="전체" /><Btn v={0} label="Ph1" /><Btn v={1} label="Ph2" /><Btn v={2} label="Ph3" />
         <div className="flex-1" />
-        <span className="text-xs" style={{ color: "#8893A0" }}>× 들어감 · • 나옴 · 바깥 호 = 엔드턴</span>
+        <span className="text-xs" style={{ color: "#8893A0" }}>× 들어감 · • 나옴 · 실선=엔드턴 · 점선=직렬연결 · U1/U2·V1/V2·W1/W2=단자</span>
       </div>
       <div className="flex-1 flex items-center justify-center min-h-0 overflow-auto" style={{ background: "#fff" }}>
         <svg width={size} height={size}>
@@ -1665,8 +1707,10 @@ function WindingLayout({ geo, res }) {
           <circle cx={C} cy={C} r={Rro * sc} fill="#CFF3F3" stroke="#0E8C8C" strokeWidth="0.8" />
           {magPaths.map((d, i) => <path key={"m" + i} d={d} fill="#CDE8CD" stroke="#1E7A1E" strokeWidth="0.4" />)}
           <circle cx={C} cy={C} r={Rsh * sc} fill="#fff" stroke="#0E8C8C" strokeWidth="0.8" />
+          {series}
           {arcs}
           {marks}
+          {terms}
           {Array.from({ length: Ns }, (_, k) => {
             const [lx, ly] = PR(RoL * 1.14, ang(k));
             return <text key={"n" + k} x={lx} y={ly + 3} fontSize="10" fill="#5C6B7A" textAnchor="middle">{k + 1}</text>;
