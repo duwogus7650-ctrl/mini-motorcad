@@ -1981,41 +1981,72 @@ function GraphsTab({ res, calc, solved }) {
   );
 }
 
-// ─── Thermal 탭 (집중정수 열등가회로 — 권선 포화온도 예측) ───────
+// 소형 선형계 풀이 (가우스 소거) — 열 노드망 G·T=Q
+function solveLin(A, b) {
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    const tmp = M[c]; M[c] = M[p]; M[p] = tmp;
+    const piv = M[c][c] || 1e-12;
+    for (let r = 0; r < n; r++) { if (r === c) continue; const f = M[r][c] / piv; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  return M.map((r, i) => r[n] / (r[i] || 1e-12));
+}
+
+// ─── Thermal 탭 (집중정수 열등가회로 6노드 — 부품별 온도, Motor-CAD식) ───────
 function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
   const data = useMemo(() => {
     if (!res) return null;
-    const a = 0.003862;
+    const a = 0.003862, Ta = therm.ambient;
     const rhoRatio = (Tc) => (1 + a * (Tc - 20)) / (1 + a * (calc.Tcu - 20));
     const Lstk = geo.stackLength * 1e-3, Ns = geo.slotNumber;
-    const linedLen = (res.linerArea / Math.max(wind.linerThk, 1e-6)) * 1e-3;          // m/슬롯
-    const Awall = Math.max(linedLen * Lstk * Ns, 1e-5);                                // 권선↔철심 접촉면
+    const Lend = Math.max((res.MLT / 2 - geo.stackLength) * 1e-3, 4e-3);                // 엔드와인딩 편측 길이
+    const linedLen = (res.linerArea / Math.max(wind.linerThk, 1e-6)) * 1e-3;
+    const Awall = Math.max(linedLen * Lstk * Ns, 1e-5);
+    const Acu = Math.max(res.condPerSlot * res.condCSA * Ns * 1e-6, 1e-6);              // 전체 동선 단면
     const Dh = (therm.housingDia > 0 ? therm.housingDia : geo.statorLamDia + 8) * 1e-3;
     const Lh = (therm.housingLen > 0 ? therm.housingLen : geo.motorLength) * 1e-3;
-    const Ahouse = Math.PI * Dh * Lh + 2 * (Math.PI / 4 * Dh * Dh);                     // 하우징 외표면
-    const Aint = Math.PI * (geo.statorLamDia * 1e-3) * Lstk;                            // 철심↔하우징 계면
-    const Rslot = (wind.linerThk * 1e-3 / therm.kLiner + 0.5e-3 / therm.kImpreg) / Awall;
-    const Ryoke = 1 / (therm.hContact * Aint) + (res.byDepth * 1e-3) / (therm.kSteel * Aint);
-    const Rconv = 1 / (therm.hConv * Ahouse);
-    const solve = (Pfe, other, kac) => {                                               // 정상상태 + 열-전기 반복
-      let Tw = calc.Tcu;
-      for (let i = 0; i < 40; i++) {
-        const Pcu = res.Pcu * rhoRatio(Tw) * kac, Q = Pcu + Pfe + other;
-        const Th = therm.ambient + Q * Rconv, Tc = Th + Q * Ryoke, Twn = Tc + Pcu * Rslot;
-        if (Math.abs(Twn - Tw) < 0.01) { Tw = Twn; break; } Tw = Twn;
-      }
-      const Pcu = res.Pcu * rhoRatio(Tw) * kac, Q = Pcu + Pfe + other;
-      const Th = therm.ambient + Q * Rconv, Tc = Th + Q * Ryoke;
-      return { Tw, Tc, Th, Q, Pcu };
-    };
-    const op = solve(res.Pfe, calc.otherLoss, res.RacRdc || 1);
-    // 온도-시간 포화곡선: 열용량 C·열시정수 τ로 1차 지수상승 → 정상상태(포화온도)로 수렴
-    const Cth = res.mCopper * 385 + res.mStator * 460;     // J/K (동선 cp≈385 + 스테이터 철심 cp≈460)
-    const tau = Cth * (Ryoke + Rconv);                     // s, 지배 열시정수
-    const Tss = op.Tw, NPT = 60, tMax = tau * 5;
-    const tmin = [], temp = [];
-    for (let i = 0; i <= NPT; i++) { const t = (tMax * i) / NPT; tmin.push(t / 60); temp.push(therm.ambient + (Tss - therm.ambient) * (1 - Math.exp(-t / tau))); }
-    return { op, Rslot, Ryoke, Rconv, Ahouse, Aint, Dh: Dh * 1e3, Lh: Lh * 1e3, Cth, tau, Tss, tmin, temp };
+    const Ahouse = Math.PI * Dh * Lh + 2 * (Math.PI / 4 * Dh * Dh);
+    const Aint = Math.PI * (geo.statorLamDia * 1e-3) * Lstk;
+    const Agap = Math.PI * (geo.statorBore * 1e-3) * Lstk;
+    const Aend = Math.PI * (geo.statorBore * 1e-3) * Lend * 2;
+    // 열저항 (K/W)
+    const Rslot = (wind.linerThk * 1e-3 / therm.kLiner + 0.5e-3 / therm.kImpreg) / Awall;  // 활성권선↔철심
+    const Rcuax = Lend / (385 * Acu);                                                       // 활성↔엔드(Cu 축전도)
+    const Rendair = 1 / (20 * Math.max(Aend, 1e-4));                                        // 엔드↔하우징(엔드공간)
+    const Ryoke = 1 / (therm.hContact * Aint) + (res.byDepth * 1e-3) / (therm.kSteel * Aint); // 철심↔하우징
+    const Rconv = 1 / (therm.hConv * Ahouse);                                               // 하우징↔공기
+    const Rgap = 1 / (40 * Math.max(Agap, 1e-4));                                           // 자석/로터↔철심(에어갭)
+    const Rmr = (geo.magnetThickness * 1e-3) / (8 * Math.max(Agap * 0.7, 1e-4));            // 자석↔로터
+    const Rbrg = 4.0;                                                                        // 로터↔하우징(베어링 근사)
+    const g = (R) => 1 / Math.max(R, 1e-9);
+    const g01 = g(Rcuax), g02 = g(Rslot), g13 = g(Rendair), g23 = g(Ryoke), g3a = g(Rconv), g42 = g(Rgap), g45 = g(Rmr), g53 = g(Rbrg);
+    const actFrac = Math.min(Math.max(2 * geo.stackLength / res.MLT, 0.2), 0.85);
+    const Pmag = calc.otherLoss * 0.5, Prot = calc.otherLoss * 0.5;   // 자석 vs 로터철손+마찰 (근사 분배)
+    // 6노드 정상상태 (열-전기 반복): 0=활성권선 1=엔드와인딩 2=철심 3=하우징 4=자석 5=로터
+    let Twavg = calc.Tcu, T = [Ta, Ta, Ta, Ta, Ta, Ta];
+    for (let it = 0; it < 40; it++) {
+      const Pcu = res.Pcu * rhoRatio(Twavg) * (res.RacRdc || 1), Pca = Pcu * actFrac, Pce = Pcu * (1 - actFrac);
+      const G = [
+        [g01 + g02, -g01, -g02, 0, 0, 0],
+        [-g01, g01 + g13, 0, -g13, 0, 0],
+        [-g02, 0, g02 + g23 + g42, -g23, -g42, 0],
+        [0, -g13, -g23, g13 + g23 + g3a + g53, 0, -g53],
+        [0, 0, -g42, 0, g42 + g45, -g45],
+        [0, 0, 0, -g53, -g45, g45 + g53],
+      ];
+      const Q = [Pca, Pce, res.Pfe, g3a * Ta, Pmag, Prot];
+      T = solveLin(G, Q);
+      const newAvg = (Pca * T[0] + Pce * T[1]) / Math.max(Pcu, 1e-6);
+      if (Math.abs(newAvg - Twavg) < 0.02) { Twavg = newAvg; break; } Twavg = newAvg;
+    }
+    const hot = Math.max(T[0], T[1]);
+    const Pcu = res.Pcu * rhoRatio(Twavg) * (res.RacRdc || 1), Qtot = Pcu + res.Pfe + calc.otherLoss;
+    // 온도-시간 포화곡선 (핫스팟 기준)
+    const Cth = res.mCopper * 385 + res.mStator * 460, tau = Cth * (Ryoke + Rconv);
+    const Tss = hot, NPT = 60, tMax = tau * 5, tmin = [], temp = [];
+    for (let i = 0; i <= NPT; i++) { const t = (tMax * i) / NPT; tmin.push(t / 60); temp.push(Ta + (Tss - Ta) * (1 - Math.exp(-t / tau))); }
+    return { T, hot, Qtot, Rslot, Rcuax, Rendair, Ryoke, Rconv, Rgap, Ahouse, Dh: Dh * 1e3, Lh: Lh * 1e3, Cth, tau, Tss, tmin, temp };
   }, [geo, wind, calc, res, therm]);
   if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 누른 뒤 표시됩니다 (손실값 필요).</div>;
   if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
@@ -2047,27 +2078,32 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
       </div>
       <div className="w-80 flex-shrink-0">
         <div className="rounded" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
-          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>정상상태 결과 (정격 운전점)</div>
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>부품별 온도 (정상상태)</div>
           <div className="px-3 py-3 text-center" style={{ background: "#FBF4EC" }}>
-            <div className="text-xs" style={{ color: "#8893A0" }}>권선 포화온도 (예측)</div>
-            <div style={{ fontSize: 30, fontWeight: 700, color: data.op.Tw > 130 ? "#B02020" : "#1B5E20", fontFamily: "Consolas,monospace" }}>{data.op.Tw.toFixed(1)} °C</div>
+            <div className="text-xs" style={{ color: "#8893A0" }}>권선 핫스팟 포화온도 (예측)</div>
+            <div style={{ fontSize: 30, fontWeight: 700, color: data.hot > 130 ? "#B02020" : "#1B5E20", fontFamily: "Consolas,monospace" }}>{data.hot.toFixed(1)} °C</div>
           </div>
-          <Row k="권선 (Cu)" v={data.op.Tw.toFixed(1)} u="°C" c="#B02020" />
-          <Row k="철심 (Fe)" v={data.op.Tc.toFixed(1)} u="°C" />
-          <Row k="하우징" v={data.op.Th.toFixed(1)} u="°C" />
+          <Row k="권선 핫스팟" v={data.hot.toFixed(1)} u="°C" c="#B02020" />
+          <Row k="엔드와인딩" v={data.T[1].toFixed(1)} u="°C" c={data.T[1] >= data.T[0] ? "#B02020" : undefined} />
+          <Row k="활성권선(슬롯)" v={data.T[0].toFixed(1)} u="°C" />
+          <Row k="스테이터 철심" v={data.T[2].toFixed(1)} u="°C" />
+          <Row k="하우징" v={data.T[3].toFixed(1)} u="°C" />
+          <Row k="자석 (PM)" v={data.T[4].toFixed(1)} u="°C" c="#1B5E20" />
+          <Row k="로터" v={data.T[5].toFixed(1)} u="°C" />
           <Row k="주위" v={therm.ambient.toFixed(1)} u="°C" />
-          <Row k="총 발열 Q" v={data.op.Q.toFixed(1)} u="W" />
-          <div className="px-2 py-1 text-xs font-bold" style={{ borderTop: "2px solid #D5DBE1", background: "#F1F4F6" }}>열저항</div>
-          <Row k="권선→철심 R_slot" v={data.Rslot.toFixed(3)} u="K/W" />
-          <Row k="철심→하우징 R_yoke" v={data.Ryoke.toFixed(3)} u="K/W" />
-          <Row k="하우징→공기 R_conv" v={data.Rconv.toFixed(3)} u="K/W" />
-          <Row k="하우징 외표면" v={(data.Ahouse * 1e4).toFixed(0)} u="cm²" />
+          <Row k="총 발열 Q" v={data.Qtot.toFixed(1)} u="W" />
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderTop: "2px solid #D5DBE1", background: "#F1F4F6" }}>열저항 / 하우징</div>
+          <Row k="활성권선→철심 R" v={data.Rslot.toFixed(3)} u="K/W" />
+          <Row k="엔드→하우징 R" v={data.Rendair.toFixed(3)} u="K/W" />
+          <Row k="철심→하우징 R" v={data.Ryoke.toFixed(3)} u="K/W" />
+          <Row k="하우징→공기 R" v={data.Rconv.toFixed(3)} u="K/W" />
+          <Row k="에어갭 R" v={data.Rgap.toFixed(3)} u="K/W" />
           <Row k="하우징(사용)" v={data.Dh.toFixed(0) + "×" + data.Lh.toFixed(0)} u="mm" />
-          <Row k="열용량 C" v={data.Cth.toFixed(0)} u="J/K" />
           <Row k="열 시정수 τ" v={(data.tau / 60).toFixed(1)} u="분" />
         </div>
-        {data.op.Tw > 130 && <div className="text-xs mt-1 px-1" style={{ color: "#B02020" }}>⚠ 권선온도 과다 — 이 냉각방식으론 연속정격 불가. 강제공냉/전도방열 또는 하우징 확대 필요.</div>}
-        {Math.abs(data.op.Tw - calc.Tcu) > 8 && <div className="text-xs mt-1 px-1" style={{ color: "#B5622D" }}>예측 권선온도 {data.op.Tw.toFixed(0)}°C ≠ 입력 {calc.Tcu}°C. 정밀화하려면 Calculation의 Armature Winding Temp를 {data.op.Tw.toFixed(0)}로 맞추고 재Solve.</div>}
+        {data.hot > 130 && <div className="text-xs mt-1 px-1" style={{ color: "#B02020" }}>⚠ 권선 핫스팟 과다 — 이 냉각방식으론 연속정격 불가. 강제공냉/전도방열 또는 하우징 확대 필요.</div>}
+        {data.T[4] > 120 && <div className="text-xs mt-1 px-1" style={{ color: "#B02020" }}>⚠ 자석온도 {data.T[4].toFixed(0)}°C — 감자 위험. 자석 등급(내열) 확인.</div>}
+        {Math.abs(data.hot - calc.Tcu) > 10 && <div className="text-xs mt-1 px-1" style={{ color: "#B5622D" }}>예측 권선온도 {data.hot.toFixed(0)}°C ≠ 입력 {calc.Tcu}°C. 정밀화하려면 Calculation의 Armature Winding Temp를 {data.hot.toFixed(0)}로 맞추고 재Solve.</div>}
       </div>
       <div className="flex-1 min-w-0">
         <Plot title="포화온도 예측 (온도–시간)" sub={"정상상태 " + data.Tss.toFixed(1) + "°C · 시정수 τ " + (data.tau / 60).toFixed(1) + "분 · ≈" + (5 * data.tau / 60).toFixed(0) + "분 후 포화"}
