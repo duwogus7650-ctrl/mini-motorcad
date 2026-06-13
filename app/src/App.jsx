@@ -800,17 +800,16 @@ function packConductors(geo, wind) {
   const targetSide = wind.turnsPerCoil * wind.strands;
   const left = [], right = [];
   let row = 0;
-  for (let x = RdL - r; x >= xMin + r - 1e-9; x -= rowH, row++) {
+  // 개구(아래)→슬롯바닥(위)으로 채우고, 각 행은 디바이더 쪽부터 벽쪽으로 (안쪽 모서리 정렬)
+  for (let x = xMin + r; x <= RdL - r + 1e-9; x += rowH, row++) {
     const off = (row % 2) * pitch / 2;
-    const yMax = RdL; // 충분히 넓게 스캔
     const rowR = [], rowL = [];
-    for (let y = divHalf + r + sep / 2 + off; y <= yMax; y += pitch) {
+    for (let y = divHalf + r + sep / 2 + off; y <= RdL; y += pitch) {
       if (ok(x, y)) rowR.push([x, y]);
       if (ok(x, -y)) rowL.push([x, -y]);
     }
-    // 벽 쪽부터 채우기 (|y| 큰 순)
-    rowR.sort((a, b) => b[1] - a[1]);
-    rowL.sort((a, b) => a[1] - b[1]);
+    rowR.sort((a, b) => a[1] - b[1]);   // 디바이더 쪽부터
+    rowL.sort((a, b) => b[1] - a[1]);
     right.push(...rowR); left.push(...rowL);
   }
   return {
