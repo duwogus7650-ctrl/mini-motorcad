@@ -1780,7 +1780,7 @@ function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
   return (
     <div className="rounded w-full" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
       <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
-        Efficiency Map <span className="font-normal" style={{ color: "#8893A0" }}>속도-토크 효율 [%] (추정 · 철손 정자속 근사)</span>
+        Efficiency Map <span className="font-normal" style={{ color: "#8893A0" }}>속도-토크 효율 [%] (추정 · 손실 속도외삽: 철손 pE1.8·기타 ∝n)</span>
       </div>
       <svg width={Wp} height={h} style={{ display: "block" }}>
         <defs><clipPath id="effclip"><polygon points={clipStr} /></clipPath></defs>
@@ -1913,8 +1913,11 @@ function GraphsTab({ res, calc, solved }) {
         const Pcu = 1.5 * Rf * (id * id + iq * iq) * kac;              // AC 포함 동손
         if (Pcu < bestPcu) {
           bestPcu = Pcu;
-          const fr = feRatio(n), Pfe = res.PfeHyst * fr + res.PfeEddy * fr * fr;
-          const Pem = Tt * wm, Pout = Pem - Pfe - calc.otherLoss, Pin = Pem + Pcu;
+          // 손실 속도 외삽(정격 기준, fr=1·n=정격에서 불변): 에디 고주파 완화 pE=1.8, 기타손실 속도비례 pO=1
+          const fr = feRatio(n);
+          const Pfe = res.PfeHyst * fr + res.PfeEddy * Math.pow(fr, 1.8);
+          const other = calc.otherLoss * (n / nRated);
+          const Pem = Tt * wm, Pout = Pem - Pfe - other, Pin = Pem + Pcu;
           bestEff = Pout > 0 && Pin > 0 ? (Pout / Pin) * 100 : 0;       // 손실>출력이면 0 (빈칸 대신 최저색)
         }
       }
