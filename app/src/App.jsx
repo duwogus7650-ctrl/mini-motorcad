@@ -1809,12 +1809,14 @@ function GraphsTab({ res, calc, solved }) {
     const Vmax = (res.noLoadSpeed * 2 * Math.PI * res.Ke) / 60; // 가용 상전압(피크) = Vdc 기반
     const Imax = res.IphRms * Math.SQRT2;                       // 동작 상전류(피크) = 전류원 한계
     const nTop = res.noLoadSpeed * 1.15, NTN = 90, Nid = 121;
-    const maxTorqueAt = (n) => {
+    const PEAKF = 1.6;                                          // 효율맵: 피크(과부하) 전류 용량 배수
+    const ImaxMap = Imax * PEAKF;
+    const maxTorqueAt = (n, Im) => {
       const wm = (n * 2 * Math.PI) / 60, we = pp * wm;
       let best = 0;
       for (let k = 0; k < Nid; k++) {
-        const id = -Imax * (k / (Nid - 1));                   // 0 → -Imax (약계자)
-        const iqCur = Math.sqrt(Math.max(Imax * Imax - id * id, 0)); // 전류원 한계
+        const id = -Im * (k / (Nid - 1));                     // 0 → -Im (약계자)
+        const iqCur = Math.sqrt(Math.max(Im * Im - id * id, 0)); // 전류원 한계
         // 전압타원: (R·id − we·Lq·iq)² + (R·iq + we·(Ld·id+λ))² = Vmax² → iq 2차식
         const a = (we * LqF) ** 2 + Rf * Rf;
         const b = 2 * Rf * we * ((LdF - LqF) * id + lamF);
@@ -1827,30 +1829,32 @@ function GraphsTab({ res, calc, solved }) {
       }
       return best;
     };
-    const tnSpeed = [], tnTorque = [], tnPower = [];
+    const tnSpeed = [], tnTorque = [], tnPower = [], tnTorqueP = [];
     for (let i = 0; i < NTN; i++) {
-      const n = (nTop * i) / (NTN - 1), T = maxTorqueAt(n);
+      const n = (nTop * i) / (NTN - 1), T = maxTorqueAt(n, Imax);
       tnSpeed.push(n); tnTorque.push(T); tnPower.push((T * n * 2 * Math.PI) / 60);
+      tnTorqueP.push(maxTorqueAt(n, ImaxMap));                 // 피크 전류 포락선(효율맵 경계)
     }
-    const T0 = tnTorque[0];
+    const T0 = tnTorque[0], T0map = tnTorqueP[0];
     let baseSpeed = nTop;
     for (let i = 1; i < NTN; i++) { if (tnTorque[i] < 0.98 * T0) { baseSpeed = tnSpeed[i]; break; } }
     const tnPmax = Math.max(...tnPower);
 
     // ── 효율맵: (속도,토크) 격자에서 최소손실 운전점 효율 (전류원+전압타원 제약, MTPA 근사) ──
+    // 피크 전류 용량(ImaxMap)까지 펼쳐 고토크 효율 하강을 포함 → 효율섬이 닫힘 (Motor-CAD 식).
     const NES = 88, NET = 60;
     const effSpeeds = Array.from({ length: NES }, (_, i) => (nTop * (i + 0.5)) / NES);
-    const effTorques = Array.from({ length: NET }, (_, j) => (T0 * (j + 0.5)) / NET);
+    const effTorques = Array.from({ length: NET }, (_, j) => (T0map * (j + 0.5)) / NET);
     const feRatio = (n) => (pp * n / 60) / Math.max(res.fe, 1e-6);
     const effGrid = effTorques.map((Tt) => effSpeeds.map((n) => {
       const wm = (n * 2 * Math.PI) / 60, we = pp * wm;
       let bestPcu = Infinity, bestEff = null;
       for (let k = 0; k <= 80; k++) {
-        const id = -Imax * (k / 80);
+        const id = -ImaxMap * (k / 80);
         const denom = lamF + (LdF - LqF) * id;
         if (Math.abs(denom) < 1e-9) continue;
         const iq = Tt / (1.5 * pp * denom);
-        if (iq < 0 || id * id + iq * iq > Imax * Imax) continue;        // 전류 한계
+        if (iq < 0 || id * id + iq * iq > ImaxMap * ImaxMap) continue;  // 전류 한계(피크)
         const Vd = Rf * id - we * LqF * iq, Vq = Rf * iq + we * (LdF * id + lamF);
         if (Vd * Vd + Vq * Vq > Vmax * Vmax) continue;                  // 전압 한계
         const Pcu = 1.5 * Rf * (id * id + iq * iq);
@@ -1864,7 +1868,7 @@ function GraphsTab({ res, calc, solved }) {
       return bestEff;
     }));
     return { deg, eW, iW, tq, tAvg, ripple, slotX, m1, mTot, mag, chains,
-      tnSpeed, tnTorque, tnPower, baseSpeed, tnPmax, opSpeed: calc.speed, opTorque: res.torque,
+      tnSpeed, tnTorque, tnPower, tnTorqueP, baseSpeed, tnPmax, opSpeed: calc.speed, opTorque: res.torque,
       effSpeeds, effTorques, effGrid };
   }, [res, calc]);
   if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하면 파형이 표시됩니다.</div>;
@@ -1903,7 +1907,7 @@ function GraphsTab({ res, calc, solved }) {
           { x: [data.opSpeed, data.opSpeed], y: [0, data.opTorque * data.opSpeed * 2 * Math.PI / 60], color: "#D98E04", label: "정격점" },
         ]} />
       <EffMap speeds={data.effSpeeds} torques={data.effTorques} grid={data.effGrid}
-        env={{ x: data.tnSpeed, y: data.tnTorque }} op={{ speed: data.opSpeed, torque: data.opTorque }} />
+        env={{ x: data.tnSpeed, y: data.tnTorqueP }} op={{ speed: data.opSpeed, torque: data.opTorque }} />
       <div className="w-full text-xs" style={{ color: "#8893A0" }}>
         모든 파형은 해석식 합성 추정치 — 슬롯팅·포화·코깅 미반영. 정밀 파형은 Motor-CAD/Maxwell FEA로 검증.
       </div>
