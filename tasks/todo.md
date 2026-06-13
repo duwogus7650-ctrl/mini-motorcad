@@ -24,6 +24,14 @@
 - [x] ⑤ Tailwind CDN → 로컬 설치 (v3 + PostCSS, 오프라인 동작)
 - [x] 전체 회귀검증 + build
 
+# 3차: Motor-CAD 충실도 개선 (2026-06-13, 사용자 피드백)
+
+- [ ] ① 권선 배치도 (Winding Pattern) — 전체 단면에 코일 루프 + go/return(×/•) + 상색상, 상 필터
+- [ ] ② Radial Pattern 표 부호 규약 Motor-CAD에 맞춤
+- [ ] ③ 슬롯 단면 그림 Motor-CAD 스타일 재작업 (정렬된 다발 + 모서리 여백 + 디바이더 간격)
+- [ ] ④ Solve 게이팅 — Solve 눌러야 Output/Graphs 표시 (Motor-CAD 흐름)
+- [ ] 각 단계 commit + build
+
 ## 2차 Review
 
 - 회귀 36개 항목: ewdgFill 8.4%(엔드와인딩 근사 모델, 추정 표기) 외 전부 5% 미만.

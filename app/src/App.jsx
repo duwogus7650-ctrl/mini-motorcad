@@ -926,6 +926,7 @@ function SlotViewer({ geo, wind }) {
 
 function WindingTab({ geo, wind, sW, res, showRef }) {
   const [wireType, setWireType] = useState("direct");
+  const [windView, setWindView] = useState("section");
   if (!res) return null;
   const wa = res.wa;
   const harmonics = [1, 3, 5, 7, 9, 11, 13];
@@ -1015,8 +1016,18 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
           <Row label="Heavy Build Slot Fill" value={res.heavyBuildFill.toFixed(3)} refv={showRef ? REF.heavyBuildFill : undefined} />
         </tbody></table>
       </div>
-      {/* 중앙: 슬롯 단면 뷰어 */}
-      <SlotViewer geo={geo} wind={wind} />
+      {/* 중앙: 슬롯 단면 / 권선 배치도 전환 */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex gap-0.5 px-3 pt-1.5" style={{ background: "#F0F2F4", borderBottom: "1px solid #D5DBE1" }}>
+          {[["section", "슬롯 단면"], ["layout", "권선 배치도"]].map(([k, l]) => (
+            <button key={k} onClick={() => setWindView(k)} className="text-xs px-3 py-1 rounded-t"
+              style={{ background: windView === k ? "#fff" : "#DDE2E7", border: "1px solid #C8CFD6", borderBottom: windView === k ? "1px solid #fff" : "1px solid #C8CFD6", marginBottom: -1, fontWeight: windView === k ? 600 : 400 }}>
+              {l}
+            </button>
+          ))}
+        </div>
+        {windView === "section" ? <SlotViewer geo={geo} wind={wind} /> : <WindingLayout geo={geo} res={res} />}
+      </div>
       {/* 우: 패턴/권선계수 */}
       <div className="w-64 overflow-y-auto flex-shrink-0 p-2 flex flex-col gap-3" style={{ background: "#FAFBFC", borderLeft: "1px solid #D5DBE1" }}>
         <div className="rounded" style={{ background: "#fff", border: "1px solid #D5DBE1" }}>
@@ -1050,7 +1061,8 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
                   <tr key={i} style={{ borderTop: "1px solid #EEF1F4" }}>
                     <td className="px-1 text-center">{i + 1}</td>
                     <td className="px-1 text-center">{Math.abs(r[0]) + Math.abs(r[1]) + Math.abs(r[2])}</td>
-                    {r.map((v, j) => <td key={j} className="px-1 text-right">{v !== 0 ? v : ""}</td>)}
+                    {/* Motor-CAD All Phases와 동일하게 크기(절대값) 표시 — 권선 방향(go/return)은 배치도 ×/•로 */}
+                    {r.map((v, j) => <td key={j} className="px-1 text-right">{v !== 0 ? Math.abs(v) : ""}</td>)}
                   </tr>
                 );
               })}
@@ -1571,6 +1583,92 @@ function GraphsTab({ res, calc }) {
       <PhasorPlot chains={data.chains} />
       <div className="w-full text-xs" style={{ color: "#8893A0" }}>
         모든 파형은 해석식 합성 추정치 — 슬롯팅·포화·코깅 미반영. 정밀 파형은 Motor-CAD/Maxwell FEA로 검증.
+      </div>
+    </div>
+  );
+}
+
+// ─── 권선 배치도 (Motor-CAD Winding Pattern 대응, SVG) ───────────
+function WindingLayout({ geo, res }) {
+  const [ph, setPh] = useState(-1); // -1 = 전체
+  const wa = res.wa;
+  const Ns = geo.slotNumber, poles = geo.poleNumber;
+  const Rb = geo.statorBore / 2, RoL = geo.statorLamDia / 2;
+  const Rro = Rb - geo.airgap, Rsh = geo.shaftDia / 2;
+  const size = 540, C = size / 2, margin = 14;
+  const worldR = RoL * 1.3;
+  const sc = (C - margin) / worldR;
+  const cols = ["#CC2222", "#1B7A2B", "#2244CC"];
+  const ang = (k) => (k * 2 * Math.PI) / Ns;          // 슬롯 k 중심각
+  const SC = ([x, y]) => [C + x * sc, C - y * sc];    // mm → 화면
+  const PR = (R, a) => [C + R * sc * Math.cos(a), C - R * sc * Math.sin(a)];
+  const pathD = (pts) => pts.map(([x, y], i) => (i ? "L" : "M") + SC([x, y]).map((v) => v.toFixed(1)).join(",")).join(" ") + "Z";
+
+  // 슬롯/자석 형상
+  const slotPaths = Array.from({ length: Ns }, (_, k) => pathD(rotPts(buildSlotPath(geo), geo.statorRot * D2R + ang(k))));
+  const magPaths = poles > 0 ? Array.from({ length: poles }, (_, k) => pathD(rotPts(buildMagnetPath(geo), geo.rotorRot * D2R + (k * 2 * Math.PI) / poles))) : [];
+
+  // 코일별 마커 + 엔드턴 아크
+  const Rgo = Rb + geo.slotDepth * 0.66, Rret = Rb + geo.slotDepth * 0.34;
+  const coils = wa.coils.filter((c) => ph < 0 || c.phase === ph);
+  const marker = (R, a, into, color, key) => {
+    const [x, y] = PR(R, a);
+    return into
+      ? <g key={key}><circle cx={x} cy={y} r="6.5" fill="#fff" stroke={color} strokeWidth="1.4" />
+          <line x1={x - 3.2} y1={y - 3.2} x2={x + 3.2} y2={y + 3.2} stroke={color} strokeWidth="1.4" />
+          <line x1={x - 3.2} y1={y + 3.2} x2={x + 3.2} y2={y - 3.2} stroke={color} strokeWidth="1.4" /></g>
+      : <g key={key}><circle cx={x} cy={y} r="6.5" fill="#fff" stroke={color} strokeWidth="1.4" />
+          <circle cx={x} cy={y} r="2.2" fill={color} /></g>;
+  };
+  const arcs = [], marks = [];
+  coils.forEach((c, idx) => {
+    const col = cols[c.phase];
+    const ag = ang(c.go), ar = ang(c.ret);
+    // 엔드턴: 라미 바깥으로 볼록한 베지어
+    const [gx, gy] = PR(RoL * 1.04, ag), [rx, ry] = PR(RoL * 1.04, ar);
+    let am = (ag + ar) / 2;
+    if (Math.abs(ar - ag) > Math.PI) am += Math.PI;   // 0/2π 경계 보정
+    const [cx, cy] = PR(RoL * 1.22, am);
+    arcs.push(<path key={"a" + idx} d={`M${gx.toFixed(1)},${gy.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${rx.toFixed(1)},${ry.toFixed(1)}`}
+      fill="none" stroke={col} strokeWidth="1.3" opacity="0.85" />);
+    marks.push(marker(Rgo, ag, c.sign > 0, col, "g" + idx));
+    marks.push(marker(Rret, ar, c.sign < 0, col, "r" + idx));
+  });
+
+  const Btn = ({ v, label }) => (
+    <button onClick={() => setPh(v)} className="text-xs px-2.5 py-1 rounded"
+      style={{ border: "1px solid #C8CFD6", background: ph === v ? (v < 0 ? "#1A222C" : cols[v]) : "#fff", color: ph === v ? "#fff" : "#2A3540", fontWeight: ph === v ? 600 : 400 }}>
+      {label}
+    </button>
+  );
+  return (
+    <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex items-center gap-1.5 px-3 py-1.5" style={{ borderBottom: "1px solid #D5DBE1" }}>
+        <span className="text-xs font-semibold mr-1" style={{ color: "#2A3540" }}>상 표시:</span>
+        <Btn v={-1} label="전체" /><Btn v={0} label="Ph1" /><Btn v={1} label="Ph2" /><Btn v={2} label="Ph3" />
+        <div className="flex-1" />
+        <span className="text-xs" style={{ color: "#8893A0" }}>× 들어감 · • 나옴 · 바깥 호 = 엔드턴</span>
+      </div>
+      <div className="flex-1 flex items-center justify-center min-h-0 overflow-auto" style={{ background: "#fff" }}>
+        <svg width={size} height={size}>
+          <circle cx={C} cy={C} r={RoL * sc} fill="#FBE9E9" stroke="#B02020" strokeWidth="1.2" />
+          <circle cx={C} cy={C} r={Rb * sc} fill="#fff" stroke="#B02020" strokeWidth="0.8" />
+          {slotPaths.map((d, i) => <path key={"s" + i} d={d} fill="#FAF3C8" stroke="#998800" strokeWidth="0.5" />)}
+          <circle cx={C} cy={C} r={Rro * sc} fill="#CFF3F3" stroke="#0E8C8C" strokeWidth="0.8" />
+          {magPaths.map((d, i) => <path key={"m" + i} d={d} fill="#CDE8CD" stroke="#1E7A1E" strokeWidth="0.4" />)}
+          <circle cx={C} cy={C} r={Rsh * sc} fill="#fff" stroke="#0E8C8C" strokeWidth="0.8" />
+          {arcs}
+          {marks}
+          {Array.from({ length: Ns }, (_, k) => {
+            const [lx, ly] = PR(RoL * 1.14, ang(k));
+            return <text key={"n" + k} x={lx} y={ly + 3} fontSize="10" fill="#5C6B7A" textAnchor="middle">{k + 1}</text>;
+          })}
+        </svg>
+      </div>
+      <div className="flex items-center gap-4 px-3 py-1 text-xs" style={{ background: "#1A222C", color: "#C8CFD6", fontFamily: "Consolas,monospace" }}>
+        <span>{Ns}슬롯 / {poles}극 · 3상 2층 Lap · Throw {wa.coils.length ? Math.abs(wa.coils[0].ret - wa.coils[0].go) || 1 : 1}</span>
+        <div className="flex-1" />
+        <span>코일 {wa.coils.length}개 (상당 {wa.coilsPerPhase}) · kw1 {res.kw1.toFixed(4)}</span>
       </div>
     </div>
   );
