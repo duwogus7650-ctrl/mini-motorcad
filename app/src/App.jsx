@@ -471,11 +471,19 @@ function compute(G, W, M, C) {
   out.mCopper = out.turnCSA * 1e-6 * (out.MLT * 1e-3 * NphTotal) * 3 * 8933;
   out.mActive = out.mStator + out.mRotor + out.mMagnet + out.mCopper;
 
+  // AC 동손 (근접효과 근사, fe² 스케일) — cAC로 kro80 FEA 캘리브레이션. 슬롯 깊이방향 층수 기반.
+  const deltaSkin = Math.sqrt(rho / (Math.PI * fe * MU0));            // 표피깊이 [m]
+  const xiAC = (W.copperDia * 1e-3) / deltaSkin;                     // 환산높이 ξ = d/δ
+  const mLayer = Math.max(1, Math.round(out.windingDepth / W.wireDia)); // 슬롯깊이 방향 도체 층수
+  out.RacRdc = 1 + C.cAC * (((mLayer * mLayer - 1) / 3) * (xiAC ** 4 / 3) + (4 / 45) * xiAC ** 4);
+  out.PcuAC = out.Pcu * out.RacRdc;        // 총 동손(AC 포함)
+  out.PcuAddl = out.Pcu * (out.RacRdc - 1); // AC 추가분
+
   // 철손 / 효율
   out.Pfe = (stl.kh * fe + stl.ke * fe ** 2) * (out.mTooth * out.Bt ** 2 + out.mBy * out.By ** 2);
   const wm = C.speed * 2 * Math.PI / 60;
   out.Pem = out.torque * wm;
-  out.Pin = out.Pem + out.Pcu;
+  out.Pin = out.Pem + out.PcuAC;
   out.Pout = out.Pem - out.Pfe - C.otherLoss;
   out.Tshaft = out.Pout / wm;
   out.eff = out.Pin > 0 ? (out.Pout / out.Pin) * 100 : 0;
@@ -533,7 +541,7 @@ const WIND0 = {
   wedgeDepth: 1.0, condSep: 0.02, wedgeModel: "wedge",
 };
 const MAT0 = { steel: "20PNX1200F", magnet: "N45UH", Br20: 1.32, tcBr: -0.12, mur: 1.05, kh: 0.0226, ke: 4.43e-5 };
-const CALC0 = { speed: 3200, Vdc: 48, IlineRms: 24.8, phaseAdv: 0, Tcu: 80, Tmag: 80, klk: 0.97, cT: 0.56, cL: 2.6, cLs: 0.33, otherLoss: 6.7, currentDef: "rms", magnetisation: "parallel", driveMode: "sine" };
+const CALC0 = { speed: 3200, Vdc: 48, IlineRms: 24.8, phaseAdv: 0, Tcu: 80, Tmag: 80, klk: 0.97, cT: 0.56, cL: 2.6, cLs: 0.33, cAC: 1.0, otherLoss: 6.7, currentDef: "rms", magnetisation: "parallel", driveMode: "sine" };
 
 // 1250W-jk Motor-CAD 참조값 (비교 표시용)
 const REF = {
@@ -1404,6 +1412,7 @@ function CalculationTab({ calc, sC, wind, sW, res, solved, setSolved }) {
           <NumIn label="치 자속계수 cT (FSCW)" value={calc.cT} step={0.01} onChange={(v) => sC("cT", v)} />
           <NumIn label="인덕턴스 보정 cL" value={calc.cL} step={0.1} onChange={(v) => sC("cL", v)} />
           <NumIn label="슬롯누설 보정 cLs" value={calc.cLs} step={0.01} onChange={(v) => sC("cLs", v)} />
+          <NumIn label="AC 동손 보정 cAC" value={calc.cAC} step={0.1} onChange={(v) => sC("cAC", v)} />
           <NumIn label="기타 손실 [W]" value={calc.otherLoss} step={0.5} onChange={(v) => sC("otherLoss", v)} />
           <div className="px-2 py-1 text-xs" style={{ color: "#8893A0" }}>기본값은 1250W-jk FEA 캘리브레이션. 토폴로지가 다르면 재조정.</div>
         </Box>
@@ -1506,7 +1515,7 @@ function OutputTab({ res, calc, showRef, solved }) {
             {r("Shaft Torque (손실 반영)", f(res.Tshaft, 4), "Nm", 3.7136)}
             {r("Electromagnetic Power", f(res.Pem, 1), "Watts", 1268.8)}
             {r("Input Power", f(res.Pin, 1), "Watts", 1307)}
-            {r("Total Losses (on load)", f(res.Pcu + res.Pfe + calc.otherLoss, 2), "Watts", 62.57)}
+            {r("Total Losses (on load)", f(res.PcuAC + res.Pfe + calc.otherLoss, 2), "Watts", 62.57)}
             {r("Output Power", f(res.Pout, 1), "Watts", 1244.4)}
             {r("System Efficiency", f(res.eff, 3), "%", 95.213)}
             {r("No Load Speed", f(res.noLoadSpeed, 0), "rpm", 3649)}
@@ -1533,11 +1542,13 @@ function OutputTab({ res, calc, showRef, solved }) {
         {sub === "loss" && (
           <Tbl>
             {r("Armature DC Copper Loss (on load)", f(res.Pcu, 2), "Watts", 32.34, true)}
+            {r("AC 동손비 R_ac/R_dc (추정)", f(res.RacRdc, 4), "")}
+            {r("AC 동손 추가분 (근접효과, 추정)", f(res.PcuAddl, 2), "Watts")}
             {r("Stator Iron Loss [hysteresis]", f(res.PfeHyst, 2), "Watts", 13.04)}
             {r("Stator Iron Loss [eddy]", f(res.PfeEddy, 2), "Watts", 10.87)}
             {r("Stator Iron Loss [total]", f(res.Pfe, 2), "Watts", 23.91)}
             {r("기타 손실 (자석+로터철손+마찰, 입력)", f(calc.otherLoss, 2), "Watts", 6.31)}
-            {r("Total Losses (on load)", f(res.Pcu + res.Pfe + calc.otherLoss, 2), "Watts", 62.57)}
+            {r("Total Losses (on load)", f(res.PcuAC + res.Pfe + calc.otherLoss, 2), "Watts", 62.57)}
           </Tbl>
         )}
         {sub === "wdg" && (<>
@@ -1883,8 +1894,10 @@ function GraphsTab({ res, calc, solved }) {
     const effSpeeds = Array.from({ length: NES }, (_, i) => (nTop * (i + 0.5)) / NES);
     const effTorques = Array.from({ length: NET }, (_, j) => (T0map * (j + 0.5)) / NET);
     const feRatio = (n) => (pp * n / 60) / Math.max(res.fe, 1e-6);
+    const kacRated = (res.RacRdc || 1) - 1, nRated = Math.max(calc.speed, 1);
     const effGrid = effTorques.map((Tt) => effSpeeds.map((n) => {
       const wm = (n * 2 * Math.PI) / 60, we = pp * wm;
+      const kac = 1 + kacRated * (n / nRated) ** 2;                  // AC 동손비(속도² 스케일)
       let bestPcu = Infinity, bestEff = null;
       for (let k = 0; k <= 80; k++) {
         const id = -ImaxMap * (k / 80);
@@ -1894,7 +1907,7 @@ function GraphsTab({ res, calc, solved }) {
         if (iq < 0 || id * id + iq * iq > ImaxMap * ImaxMap) continue;  // 전류 한계(피크)
         const Vd = Rf * id - we * LqF * iq, Vq = Rf * iq + we * (LdF * id + lamF);
         if (Vd * Vd + Vq * Vq > Vmax * Vmax) continue;                  // 전압 한계
-        const Pcu = 1.5 * Rf * (id * id + iq * iq);
+        const Pcu = 1.5 * Rf * (id * id + iq * iq) * kac;              // AC 포함 동손
         if (Pcu < bestPcu) {
           bestPcu = Pcu;
           const fr = feRatio(n), Pfe = res.PfeHyst * fr + res.PfeEddy * fr * fr;
