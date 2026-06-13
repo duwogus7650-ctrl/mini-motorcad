@@ -194,6 +194,24 @@ function extractGeometry(shapes) {
     outerN, innerN, borePoly: +borePoly.toFixed(2) };
 }
 
+// 변환(중심·회전·단위 적용)된 형상을 DXF 텍스트로 출력. T={scale,rot(deg),dx,dy}
+function shapesToDxf(shapes, T) {
+  const rad = T.rot * D2R, c = Math.cos(rad), s = Math.sin(rad);
+  const tf = (px, py) => [T.dx + T.scale * (px * c - py * s), T.dy + T.scale * (px * s + py * c)];
+  const L = ["0", "SECTION", "2", "ENTITIES"];
+  const f = (v) => v.toFixed(4);
+  for (const sh of shapes) {
+    if (sh.type === "circle") { const [x, y] = tf(sh.cx, sh.cy); L.push("0", "CIRCLE", "8", "0", "10", f(x), "20", f(y), "30", "0", "40", f(sh.r * T.scale)); }
+    else if (sh.type === "arc") { const [x, y] = tf(sh.cx, sh.cy); L.push("0", "ARC", "8", "0", "10", f(x), "20", f(y), "30", "0", "40", f(sh.r * T.scale), "50", f(sh.a1 / D2R + T.rot), "51", f(sh.a2 / D2R + T.rot)); }
+    else if (sh.type === "poly" && sh.pts && sh.pts.length) {
+      L.push("0", "LWPOLYLINE", "8", "0", "90", String(sh.pts.length), "70", sh.closed ? "1" : "0");
+      sh.pts.forEach(([px, py]) => { const [x, y] = tf(px, py); L.push("10", f(x), "20", f(y)); });
+    }
+  }
+  L.push("0", "ENDSEC", "0", "EOF");
+  return L.join("\n");
+}
+
 // ─── 형상 생성 ───────────────────────────────────────────────────
 function buildSlotPath(P) {
   const Rb = P.statorBore / 2, Rd = Rb + P.slotDepth, halfOp = P.slotOpening / 2;
@@ -798,7 +816,10 @@ function GeometryTab({ geo, sG, res }) {
   const runExtract = (shapes) => {
     const ex = extractGeometry(shapes);
     if (!ex) { alert("형상을 추출할 수 없습니다 (원/닫힌 폴리라인 없음)."); return; }
-    setDxfT({ scale: ex.unit, dx: -ex.cx * ex.unit, dy: -ex.cy * ex.unit, rot: 0 });
+    // 축 정렬: 슬롯을 +X축에 맞추도록 DXF를 −statorRot 회전(중심 유지) → 회전각 0 정규화
+    const rot = -ex.statorRot, rad = rot * D2R, c = Math.cos(rad), s = Math.sin(rad);
+    const rx = ex.cx * c - ex.cy * s, ry = ex.cx * s + ex.cy * c;
+    setDxfT({ scale: ex.unit, rot, dx: -ex.unit * rx, dy: -ex.unit * ry });
     const applied = [];
     const put = (k, v, lo, hi, dec = 2) => { if (isFinite(v) && v > lo && v < hi) { sG(k, +v.toFixed(dec)); applied.push(k); } };
     put("statorLamDia", ex.statorLamDia, 5, 2000);
@@ -807,9 +828,18 @@ function GeometryTab({ geo, sG, res }) {
     if (ex.slotCount >= 3 && ex.slotCount <= 90) { sG("slotNumber", ex.slotCount); applied.push("slotNumber"); }
     if (ex.poleCount >= 2 && ex.poleCount <= 80) { sG("poleNumber", ex.poleCount); applied.push("poleNumber"); }
     put("airgap", ex.airgap, 0.05, 5);
-    if (isFinite(ex.statorRot)) { sG("statorRot", +ex.statorRot.toFixed(1)); applied.push("statorRot"); }
-    if (isFinite(ex.rotorRot)) { sG("rotorRot", +ex.rotorRot.toFixed(1)); applied.push("rotorRot"); }
-    setAutoInfo({ ...ex, applied });
+    sG("statorRot", 0); applied.push("statorRot");          // 정렬했으므로 0
+    sG("rotorRot", +(ex.rotorRot - ex.statorRot).toFixed(1)); applied.push("rotorRot");
+    setAutoInfo({ ...ex, applied, aligned: true });
+  };
+  const exportAlignedDxf = () => {
+    if (!dxf) { alert("먼저 DXF를 불러오세요."); return; }
+    const txt = shapesToDxf(dxf, dxfT);
+    const blob = new Blob([txt], { type: "application/dxf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = (dxfName.replace(/\.dxf$/i, "") || "section") + "_aligned.dxf";
+    a.click(); URL.revokeObjectURL(url);
   };
   const mDist = mPts.length === 2 ? Math.hypot(mPts[1][0] - mPts[0][0], mPts[1][1] - mPts[0][1]) : null;
 
@@ -847,6 +877,12 @@ function GeometryTab({ geo, sG, res }) {
             style={{ background: "#1B7A2B", cursor: "pointer" }}>
             ⚙ 자동 정렬·형상 추출{!dxf && " (DXF 선택)"}
           </button>
+          {dxf && (
+            <button onClick={exportAlignedDxf} className="text-xs px-2 py-1 rounded font-medium"
+              style={{ border: "1px solid #1B7A2B", color: "#1B7A2B", background: "#fff", cursor: "pointer" }}>
+              ⬇ 정렬 DXF 내보내기
+            </button>
+          )}
           {autoInfo && (
             <div className="text-xs rounded p-2 mt-0.5" style={{ background: "#F0F7F1", border: "1px solid #BBD9C0", fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
               <div className="font-bold mb-0.5" style={{ color: "#1B7A2B" }}>추출 결과 (단위 ×{autoInfo.unit})</div>
