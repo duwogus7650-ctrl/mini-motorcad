@@ -806,6 +806,10 @@ function GeometryTab({ geo, sG, res }) {
       const shapes = parseDxf(text);
       if (!shapes.length) throw new Error("no entities");
       setDxf(shapes); setDxfName(file.name); setAutoInfo(null);
+      // 표시만 중심정렬 (형상 파라미터는 절대 건드리지 않음 — 사용자가 직접 치수로 맞춤)
+      const ex = extractGeometry(shapes);
+      if (ex) setDxfT({ scale: ex.unit, rot: 0, dx: -ex.unit * ex.cx, dy: -ex.unit * ex.cy });
+      else setDxfT({ scale: 1, rot: 0, dx: 0, dy: 0 });
       if (autoPendingRef.current) { autoPendingRef.current = false; runExtract(shapes); }
     } catch (err) { alert("DXF 파싱 실패: " + err.message); }
   };
