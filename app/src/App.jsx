@@ -1745,6 +1745,9 @@ function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
     cells.push(<rect key={j + "_" + i} x={xl} y={yt} width={Math.max(xr - xl + 0.6, 0.6)} height={Math.max(yb - yt + 0.6, 0.6)} fill={cellColor(e)} shapeRendering="crispEdges" />);
   }
   const envPts = env.x.map((xx, i) => sx(xx) + "," + sy(env.y[i])).join(" ");
+  // 포락선 다각형으로 클리핑 → 곡선 경계의 계단/삐짐 제거
+  const clipPoly = [[0, 0]].concat(env.x.map((xx, i) => [xx, Math.min(env.y[i], yMax)])).concat([[env.x[env.x.length - 1], 0]]);
+  const clipStr = clipPoly.map(([xx, yy]) => sx(xx).toFixed(1) + "," + sy(yy).toFixed(1)).join(" ");
   const cbH = h - P.t - P.b;
   // iso-효율 등고선 (Motor-CAD 식): 정수 효율 레벨마다 선 + 주요 레벨 라벨
   const contourEls = [], labelEls = [];
@@ -1767,11 +1770,10 @@ function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
         Efficiency Map <span className="font-normal" style={{ color: "#8893A0" }}>속도-토크 효율 [%] (추정 · 철손 정자속 근사)</span>
       </div>
       <svg width={Wp} height={h} style={{ display: "block" }}>
+        <defs><clipPath id="effclip"><polygon points={clipStr} /></clipPath></defs>
         <rect x={P.l} y={P.t} width={Wp - P.l - P.r} height={cbH} fill="#1f2540" />
-        {cells}
-        {contourEls}
-        {labelEls}
-        <polyline fill="none" stroke="#111" strokeWidth="1.8" points={envPts} />
+        <g clipPath="url(#effclip)">{cells}{contourEls}{labelEls}</g>
+        <polyline fill="none" stroke="#111" strokeWidth="1.6" points={envPts} />
         {op && op.torque <= yMax && <g><circle cx={sx(op.speed)} cy={sy(op.torque)} r="4.5" fill="#fff" stroke="#111" strokeWidth="1.8" />
           <text x={sx(op.speed) + 7} y={sy(op.torque) - 5} fontSize="10" fontWeight="bold" fill="#111">정격</text></g>}
         {Array.from({ length: 6 }, (_, i) => { const xv = xMax * i / 5; return <text key={"x" + i} x={sx(xv)} y={h - P.b + 12} fontSize="9" fill="#5C6B7A" textAnchor="middle">{Math.round(xv)}</text>; })}
