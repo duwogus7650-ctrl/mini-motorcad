@@ -758,17 +758,22 @@ function GeometryTab({ geo, sG, res }) {
     V.scale = Math.min(wrap.clientWidth, wrap.clientHeight) / (geo.statorLamDia * 1.15);
     draw();
   };
+  const autoPendingRef = useRef(false);
   const loadFile = async (file) => {
     const text = await file.text();
     try {
       const shapes = parseDxf(text);
       if (!shapes.length) throw new Error("no entities");
       setDxf(shapes); setDxfName(file.name); setAutoInfo(null);
+      if (autoPendingRef.current) { autoPendingRef.current = false; runExtract(shapes); }
     } catch (err) { alert("DXF 파싱 실패: " + err.message); }
   };
   const autoExtract = () => {
-    if (!dxf) { alert("먼저 DXF를 불러오세요."); return; }
-    const ex = extractGeometry(dxf);
+    if (!dxf) { autoPendingRef.current = true; fileRef.current?.click(); return; } // 없으면 파일 선택 → 로드 후 자동추출
+    runExtract(dxf);
+  };
+  const runExtract = (shapes) => {
+    const ex = extractGeometry(shapes);
     if (!ex) { alert("형상을 추출할 수 없습니다 (원/닫힌 폴리라인 없음)."); return; }
     setDxfT({ scale: ex.unit, dx: -ex.cx * ex.unit, dy: -ex.cy * ex.unit, rot: 0 });
     const applied = [];
@@ -815,9 +820,9 @@ function GeometryTab({ geo, sG, res }) {
               측정 {measure ? "ON" : "OFF"}
             </button>
           </div>
-          <button onClick={autoExtract} disabled={!dxf} className="text-xs px-2 py-1.5 rounded text-white font-medium"
-            style={{ background: dxf ? "#1B7A2B" : "#A8B2BC", cursor: dxf ? "pointer" : "default" }}>
-            ⚙ 자동 정렬·형상 추출
+          <button onClick={autoExtract} className="text-xs px-2 py-1.5 rounded text-white font-medium"
+            style={{ background: "#1B7A2B", cursor: "pointer" }}>
+            ⚙ 자동 정렬·형상 추출{!dxf && " (DXF 선택)"}
           </button>
           {autoInfo && (
             <div className="text-xs rounded p-2 mt-0.5" style={{ background: "#F0F7F1", border: "1px solid #BBD9C0", fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
