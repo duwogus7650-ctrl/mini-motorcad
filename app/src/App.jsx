@@ -810,7 +810,7 @@ function packConductors(geo, wind) {
         const t = xMin + aoff * cD + k * pitch * cD;
         if (t > RdL + 2) break;
         const x = t + perp * inx, y = wy(t) + perp * iny;
-        if (ok(x, y)) cand.push([x, y, col, k]);
+        if (ok(x, y) && (side > 0 ? y > 0 : y < 0)) cand.push([x, y, col, k]); // 자기 절반만
       }
     }
     // 벽쪽(col↑) → 안쪽 순으로, 겹치지 않는 것만 채택 (정렬된 기계권선 다발)
