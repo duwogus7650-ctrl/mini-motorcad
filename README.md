@@ -11,21 +11,28 @@ Ansys Motor-CAD의 기초설계 워크플로우(형상 → 권선 → 재질 →
 
 Node.js 18 이상 필요 (https://nodejs.org)
 
-### 가장 쉬운 방법 (Windows)
+### 가장 쉬운 방법 (Windows) — VSCode 불필요
 
-저장소 루트의 **`run_gui.bat` 더블클릭**. 최초 실행 시 의존성을 자동 설치하고,
-개발 서버가 준비되면 브라우저(http://localhost:5173)가 자동으로 열린다.
-종료하려면 콘솔 창에서 Ctrl+C 또는 창을 닫는다.
+저장소 루트의 **`run_gui.bat` 더블클릭**. (탐색기에서 그냥 두 번 클릭)
+- 최초 실행 시 의존성을 자동 설치하고, 준비되면 브라우저(http://localhost:5173)가 자동으로 열린다.
+- Python 이 설치돼 있으면 **FEMM 브릿지 서버(localhost:8765)도 별도 창에서 자동 시작** →
+  앱의 "FEMM 해석" 버튼이 바로 동작한다. (FEMM 4.2 64bit + `pip install pyfemm flask flask-cors` 필요)
+- 종료: 웹앱 창에서 Ctrl+C(또는 창 닫기), FEMM 창도 함께 닫는다.
+
+**FEMM 서버만 따로 켜기/재시작**: `run_femm_server.bat` 더블클릭.
+(FEMM 관련 코드를 고친 뒤에는 이 서버를 Ctrl+C로 끄고 다시 켜야 반영됨)
 
 ### 수동 실행
 
 ```bash
 cd app
 npm install
-npm run dev
+npm run dev          # 웹앱 → http://localhost:5173
 ```
-
-브라우저에서 http://localhost:5173 접속.
+FEMM 해석까지 쓰려면 별도 터미널에서:
+```bash
+python fea/femm_server.py   # 브릿지 → http://localhost:8765
+```
 
 ## 탭 구성 (Motor-CAD 대응)
 
