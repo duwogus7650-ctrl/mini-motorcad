@@ -135,6 +135,7 @@ def airgap_bn(d, npts=180):
 @app.route('/solve', methods=['POST'])
 def solve():
     d = request.get_json(force=True)
+    print('\n[solve] 요청 수신 — Ns=%s poles=%s  FEMM 구동 시도...' % (d.get('Ns'), d.get('poles')), flush=True)
     try:
         pp = d['poles'] / 2
         Ipk = d['Ipk']
@@ -196,9 +197,13 @@ def solve():
         femm.mo_close()
         femm.mi_close()
 
+        print('[solve] 완료 — 평균토크 %.3f Nm, 리플 %.1f%%, 코깅 %.1f mNm, Bg %.3f T'
+              % (avgT, ripT, cogPP, Bg), flush=True)
         return jsonify(ok=True, avgTorque=avgT, torqueRipple=ripT,
                        coggingPP=cogPP, Bg=Bg, loadT=loadT, cogT=cogT)
     except Exception as e:
+        print('[solve] 실패 ↓↓↓', flush=True)
+        print(traceback.format_exc(), flush=True)
         try:
             femm.closefemm()
         except Exception:
