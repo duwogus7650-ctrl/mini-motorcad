@@ -2065,19 +2065,22 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
   const scv = Math.min((Wv - 2 * mxv) / (2 * xMx), (Hv - 2 * mxv) / (2 * yMx)), cxv = Wv / 2, cyv = Hv / 2;
   const SXv = (x) => cxv + x * scv, SYv = (r) => cyv - r * scv;
   const Tmn = therm.ambient, Tmx = Math.max(...data.T, Tmn + 1), tc = (T) => jetColor((T - Tmn) / (Tmx - Tmn));
-  const band = (x0, x1, r0, r1, T, key) => [
-    <rect key={key + "t"} x={SXv(x0)} y={SYv(r1)} width={(x1 - x0) * scv} height={(r1 - r0) * scv} fill={tc(T)} stroke="#00000022" strokeWidth="0.5" />,
-    <rect key={key + "b"} x={SXv(x0)} y={SYv(-r0)} width={(x1 - x0) * scv} height={(r1 - r0) * scv} fill={tc(T)} stroke="#00000022" strokeWidth="0.5" />,
-  ];
+  const band = (x0, x1, r0, r1, T, key, fillOverride) => {
+    const f = fillOverride || tc(T);
+    return [
+      <rect key={key + "t"} x={SXv(x0)} y={SYv(r1)} width={(x1 - x0) * scv} height={(r1 - r0) * scv} fill={f} stroke="#00000066" strokeWidth="0.7" />,
+      <rect key={key + "b"} x={SXv(x0)} y={SYv(-r0)} width={(x1 - x0) * scv} height={(r1 - r0) * scv} fill={f} stroke="#00000066" strokeWidth="0.7" />,
+    ];
+  };
   const parts = [
+    ...band(-Lh / 2, Lh / 2, 0, Rsh, data.T[5], "sh", "#9AA4AE"),    // 샤프트(회색, 열원 아님)
     ...band(-Lh / 2, Lh / 2, Rsl, Rh, data.T[3], "hou"),
     ...band(-Lstk / 2, Lstk / 2, Rb, Rsl, data.T[2], "fe"),
     ...band(-Lstk / 2, Lstk / 2, Rb, Rb + 0.45 * (Rsl - Rb), data.T[0], "act"),
     ...band(-Lstk / 2 - Lend, -Lstk / 2, Rb, Rb + 0.6 * (Rsl - Rb), data.T[1], "ewl"),
     ...band(Lstk / 2, Lstk / 2 + Lend, Rb, Rb + 0.6 * (Rsl - Rb), data.T[1], "ewr"),
-    ...band(-Lstk / 2, Lstk / 2, Rmi, Rro, data.T[4], "mag"),
-    ...band(-Lstk / 2, Lstk / 2, Rsh, Rmi, data.T[5], "rot"),
-    ...band(-Lh / 2, Lh / 2, 0, Rsh, data.T[5], "sh"),
+    ...band(-Lstk / 2, Lstk / 2, Rsh, Rmi, data.T[5], "rot"),         // 로터 철심
+    ...band(-Lstk / 2, Lstk / 2, Rmi, Rro, data.T[4], "mag"),         // 자석(얇은 띠)
   ];
   return (
     <div className="flex h-full overflow-auto gap-3 p-3 items-start">
