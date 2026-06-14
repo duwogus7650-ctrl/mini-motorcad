@@ -562,7 +562,9 @@ function compute(G, W, M, C, cal) {
   const hs = G.slotDepth - G.toothTipDepth, ws = slotWMid;
   const pSlot = MU0 * (G.stackLength * 1e-3) * (hs / (3 * ws) + G.toothTipDepth / G.slotOpening);
   const Lslot = C.cLs * (4 * 3 / Ns) * NphSeries ** 2 * pSlot / W.parallelPaths;
-  out.Ld = (Lm + Lslot) * 1e3; out.Lq = out.Ld * 1.09; // SPM: Lq 약간 큼(슬롯/포화)
+  const LdAnalytic = (Lm + Lslot) * 1e3, LqAnalytic = LdAnalytic * 1.09; // SPM: Lq 약간 큼(슬롯/포화)
+  out.Ld = (cal && Number.isFinite(cal.Ld) && cal.Ld > 0) ? cal.Ld : LdAnalytic;  // FEMM 보정 시 FEA 인덕턴스
+  out.Lq = (cal && Number.isFinite(cal.Lq) && cal.Lq > 0) ? cal.Lq : LqAnalytic;
 
   // 파생량 (Motor-CAD Output Data 항목)
   out.Km = out.Pcu > 0 ? out.torque / Math.sqrt(out.Pcu) : 0;
@@ -1845,6 +1847,8 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
               {Number.isFinite(femmRes.BEMFpk) && <Row label="무부하 역기전력 피크 (FEA)" value={femmRes.BEMFpk.toFixed(2)} unit="V" />}
               {Number.isFinite(femmRes.Bt) && <Row label="치 자속밀도 (FEA, 부하)" value={femmRes.Bt.toFixed(3)} unit="T" />}
               {Number.isFinite(femmRes.By) && <Row label="요크 자속밀도 (FEA, 부하)" value={femmRes.By.toFixed(3)} unit="T" />}
+              {Number.isFinite(femmRes.Ld) && femmRes.Ld > 0 && <Row label="d축 인덕턴스 Ld (FEA)" value={femmRes.Ld.toFixed(4)} unit="mH" />}
+              {Number.isFinite(femmRes.Lq) && femmRes.Lq > 0 && <Row label="q축 인덕턴스 Lq (FEA)" value={femmRes.Lq.toFixed(4)} unit="mH" />}
               <tr><td colSpan={3} style={{ borderTop: "1px solid #22304d" }} /></tr>
               <Row label="해석식 토크 (비교)" value={res.torque.toFixed(3)} unit="Nm" />
               {Number.isFinite(femmRes.Ke) && <Row label="해석식 Ke (비교)" value={res.Ke.toFixed(4)} unit="V·s/rad" />}
@@ -1865,7 +1869,7 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
                     const Tlam = 1.5 * res.pp * lamF * (res.IphRms * Math.SQRT2) * Math.cos(calc.phaseAdv * D2R);
                     const kT = (Math.abs(Tlam) > 1e-3 && Number.isFinite(femmRes.avgTorque)) ? femmRes.avgTorque / Tlam : 1;
                     setFemmCal({ lam: lamF, ke: femmRes.Ke, kT, torqueFea: femmRes.avgTorque,
-                      Bt: femmRes.Bt, By: femmRes.By, source: "FEMM" });
+                      Bt: femmRes.Bt, By: femmRes.By, Ld: femmRes.Ld, Lq: femmRes.Lq, source: "FEMM" });
                   }}
                     className="w-full py-2 rounded text-xs font-semibold"
                     style={{ border: "1px solid #1B7A2B", background: "#1B7A2B", color: "#fff" }}>

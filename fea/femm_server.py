@@ -216,6 +216,21 @@ def flux_linkage(d, sROT, p, depth_m):
     return lam * depth_m
 
 
+def dq_flux(d, sROT, psi, depth_m):
+    """현재 해의 dq축 쇄교자속(raw, 총턴) 반환. d축을 A상축(ψ0)에 정렬한 위치 기준.
+    Park: θ_p = ψ0−ψ_p, λd=(2/3)Σλ_p cosθ_p, λq=−(2/3)Σλ_p sinθ_p."""
+    lp = [flux_linkage(d, sROT, p, depth_m) for p in range(3)]
+    th = [psi[0] - psi[p] for p in range(3)]
+    ld = (2.0 / 3.0) * sum(lp[p] * math.cos(th[p]) for p in range(3))
+    lq = -(2.0 / 3.0) * sum(lp[p] * math.sin(th[p]) for p in range(3))
+    return ld, lq
+
+
+def dq_currents(psi, idq, iqq):
+    """dq 전류(터미널)를 상전류로 역변환. i_p = id·cosθ_p − iq·sinθ_p, θ_p=ψ0−ψ_p."""
+    return [idq * math.cos(psi[0] - psi[p]) - iqq * math.sin(psi[0] - psi[p]) for p in range(3)]
+
+
 def solve_torque():
     femm.mi_analyze(0)
     femm.mi_loadsolution()
@@ -319,11 +334,28 @@ def solve():
                       % (int(femm.mo_numnodes()), int(femm.mo_numelements())), flush=True)
             except Exception:
                 pass
-            lam_pk = abs(flux_linkage(d, sROT, 0, depth_m)) / P    # 피크 쇄교자속[Wb]
+            ld0, lq0 = dq_flux(d, sROT, psi, depth_m)             # 무부하 dq 쇄교자속(raw)
+            lam_pk = abs(ld0) / P                                  # 피크 쇄교자속[Wb] = d축 PM자속
             Bg = airgap_bn(d)
             Ke = pp * lam_pk                                       # V·s/rad
             we = pp * speed * 2 * math.pi / 60.0
             BEMFpk = we * lam_pk                                   # V (피크 상 역기전력)
+
+            # 1b) 인덕턴스 Ld/Lq (정렬 위치 고정, dq 전류 주입 → 쇄교자속 변화). 정격전류 기준 apparent.
+            Ld = Lq = 0.0
+            if Ipk > 1e-6:
+                ia, ib, ic = dq_currents(psi, -Ipk, 0.0)          # 약계자(−d) 방향 d축 전류
+                set_currents(d, ia, ib, ic)
+                femm.mi_analyze(0); femm.mi_loadsolution()
+                ldD, _ = dq_flux(d, sROT, psi, depth_m)
+                Ld = abs(ld0 - ldD) / P / Ipk * 1e3               # mH
+                ia, ib, ic = dq_currents(psi, 0.0, Ipk)           # q축 전류
+                set_currents(d, ia, ib, ic)
+                femm.mi_analyze(0); femm.mi_loadsolution()
+                _, lqQ = dq_flux(d, sROT, psi, depth_m)
+                Lq = abs(lqQ - lq0) / P / Ipk * 1e3               # mH
+                print('[solve] 인덕턴스 Ld %.4f mH, Lq %.4f mH (정격전류 apparent)' % (Ld, Lq), flush=True)
+            set_currents(d, 0, 0, 0)
 
             # 2) 부하 토크 (cogPeriod 1주기, 부하각 고정 동기전류) → 평균·리플 + 철심 자속밀도
             loadT = []
@@ -359,7 +391,7 @@ def solve():
                   % (avgT, ripT, cogPP, Bg, Ke, BtFea, ByFea), flush=True)
             return jsonify(ok=True, avgTorque=avgT, torqueRipple=ripT,
                            coggingPP=cogPP, Bg=Bg, Ke=Ke, BEMFpk=BEMFpk,
-                           Bt=BtFea, By=ByFea,
+                           Bt=BtFea, By=ByFea, Ld=Ld, Lq=Lq,
                            loadT=loadT, cogT=cogT,
                            psiDeg=[math.degrees(x) for x in psi])
         except Exception as e:
