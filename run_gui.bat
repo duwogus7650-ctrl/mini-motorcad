@@ -44,13 +44,29 @@ if not exist "node_modules" (
   echo.
 )
 
-echo [실행] 웹앱 개발 서버를 시작합니다.
-echo        준비되면 브라우저가 자동으로 열립니다 ^(http://localhost:5173^).
+echo [실행] 웹앱을 앱 모드(독립 창)로 시작합니다.
+echo        준비되면 주소창 없는 독립 창으로 열립니다 ^(http://localhost:5173^).
 echo        종료: 이 창에서 Ctrl+C ^(FEMM 창도 함께 닫으세요^).
 echo.
 
-rem --- 서버 시작 + 준비되면 브라우저 자동 오픈 ---
-call npm run dev -- --open
+rem --- 앱 모드 브라우저 탐지 (Edge 우선, 없으면 Chrome) ---
+set "APPURL=http://localhost:5173"
+set "BROWSER="
+if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" set "BROWSER=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
+if not defined BROWSER if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" set "BROWSER=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
+if not defined BROWSER if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" set "BROWSER=%ProgramFiles%\Google\Chrome\Application\chrome.exe"
+if not defined BROWSER if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" set "BROWSER=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"
+
+rem --- 서버 준비(~4초) 후 독립 창 실행. 앱모드 브라우저 없으면 기본 브라우저 탭으로 폴백 ---
+if defined BROWSER (
+  start "" /b cmd /c "timeout /t 4 /nobreak >nul & ""%BROWSER%"" --app=%APPURL% --window-size=1340,900"
+) else (
+  echo [안내] Edge/Chrome 미발견 - 기본 브라우저 탭으로 엽니다.
+  start "" /b cmd /c "timeout /t 4 /nobreak >nul & start %APPURL%"
+)
+
+rem --- 서버 시작 (포트 5173 고정) ---
+call npm run dev -- --port 5173
 
 echo.
 echo 서버가 종료되었습니다.

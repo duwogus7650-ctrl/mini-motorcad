@@ -32,7 +32,7 @@ const UI = {
 };
 // 패널 카드 (브래킷 코너 장식 포함) — 다크 컨트롤패널 룩
 const Panel = ({ title, accent = UI.cyan, children, style, bodyClass = "" }) => (
-  <div style={{ position: "relative", background: UI.panel, border: `1px solid ${UI.border}`, borderRadius: 10, boxShadow: "0 2px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.03)", ...style }}>
+  <div style={{ position: "relative", background: `linear-gradient(180deg,${UI.panel},#0e1626)`, border: `1px solid ${UI.border}`, borderRadius: 14, boxShadow: "0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)", ...style }}>
     {title && (
       <div className="px-3 pt-2 pb-1.5 text-xs font-semibold" style={{ color: UI.label, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: UI.ui }}>
         <span style={{ color: accent, marginRight: 6 }}>▮</span>{title}
