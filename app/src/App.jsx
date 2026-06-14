@@ -2629,14 +2629,13 @@ function WindingLayout({ geo, res }) {
   const visC = wa.coils.filter((c) => ph < 0 || c.phase === ph);
   // 전류방향 기호: into(⊗, 들어감) / out(⊙, 나옴). 작은 박스 안에 표기.
   const marker = (R, a, into, color, key) => {
-    const [x, y] = PR(R, a), s = 7.5;
+    const [x, y] = PR(R, a);
     return <g key={key}>
-      <rect x={x - s} y={y - s} width={2 * s} height={2 * s} rx="2.2" fill="#fffdf0" stroke={color} strokeWidth="1.3" />
-      <circle cx={x} cy={y} r="4.6" fill="none" stroke={color} strokeWidth="1.2" />
+      <circle cx={x} cy={y} r="6" fill="#fffdf0" stroke={color} strokeWidth="1.4" />
       {into
-        ? <g><line x1={x - 3.1} y1={y - 3.1} x2={x + 3.1} y2={y + 3.1} stroke={color} strokeWidth="1.3" />
-            <line x1={x - 3.1} y1={y + 3.1} x2={x + 3.1} y2={y - 3.1} stroke={color} strokeWidth="1.3" /></g>
-        : <circle cx={x} cy={y} r="1.7" fill={color} />}
+        ? <g><line x1={x - 3.2} y1={y - 3.2} x2={x + 3.2} y2={y + 3.2} stroke={color} strokeWidth="1.4" />
+            <line x1={x - 3.2} y1={y + 3.2} x2={x + 3.2} y2={y - 3.2} stroke={color} strokeWidth="1.4" /></g>
+        : <circle cx={x} cy={y} r="2" fill={color} />}
     </g>;
   };
   // 엔드턴 아크 (코일 go↔ret, 라미 바깥 볼록 베지어)
