@@ -71,7 +71,7 @@ def build(d):
     murMag = 1.05
     Hc = d['Br'] / (MU0 * murMag)
 
-    femm.openfemm(0)            # 0 = 창 보임(진단용)
+    femm.openfemm(1)            # 1 = 창 숨김 (모델은 mini_motorcad.fem 로 저장됨)
     femm.newdocument(0)
     femm.mi_probdef(0, 'millimeters', 'planar', 1e-8, d['depth'], 30)
     femm.mi_getmaterial('Air')
