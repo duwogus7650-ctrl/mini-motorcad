@@ -594,6 +594,64 @@ const THERM0 = {
 };
 const COOL_H = { natural: 10, forced: 60, conduction: 200 };
 
+// ─── FEMM Lua 스크립트 생성 (2D 자기정적) — 진짜 FEA를 무료 FEMM에서 실행 ───
+function femmLua(geo, wind, calc, res) {
+  const Ns = geo.slotNumber, poles = geo.poleNumber;
+  const Rlam = geo.statorLamDia / 2, Rb = geo.statorBore / 2;
+  const Rro = (geo.statorBore - 2 * geo.airgap) / 2, Rsh = geo.shaftDia / 2;
+  const Rmi = Rro - geo.magnetThickness, Rd = Rb + geo.slotDepth;
+  const depth = geo.stackLength;
+  const mu0 = 4 * Math.PI * 1e-7, murMag = 1.05;
+  const Hc = (res.Br_used || 1.2) / (mu0 * murMag);
+  const Ip = res.IphRms * Math.SQRT2;                     // 상전류 피크
+  const ia = Ip, ib = -Ip / 2, ic = -Ip / 2;             // A상 피크 순간
+  const tbl = res.wa.table, slotA = Math.max(res.slotArea * 1e-6, 1e-9);
+  const rot = (pts, a) => { const c = Math.cos(a), s = Math.sin(a); return pts.map(([x, y]) => [x * c - y * s, x * s + y * c]); };
+  const sp = buildSlotPath(geo), mp = buildMagnetPath(geo);
+  const f = (v) => v.toFixed(3);
+  const L = ["-- Mini Motor-CAD → FEMM 자동생성 (2D 자기정적). FEMM에서 File>Open Lua Script로 실행.",
+    "showconsole(); newdocument(0)",
+    `mi_probdef(0,'millimeters','planar',1e-8,${depth.toFixed(2)},30)`,
+    "mi_getmaterial('Air'); mi_getmaterial('M-19 Steel'); mi_getmaterial('Pure Iron')",
+    `mi_addmaterial('PM',${murMag},${murMag},${Hc.toFixed(0)},0,0,0,0,1,0,0,0,0,0)`];
+  const seg = (pr) => { for (let k = 0; k < pr.length; k++) { const a = pr[k], b = pr[(k + 1) % pr.length]; L.push(`mi_addsegment(${f(a[0])},${f(a[1])},${f(b[0])},${f(b[1])})`); } };
+  const arc = (R) => { L.push(`mi_addarc(${f(R)},0,${f(-R)},0,180,5)`, `mi_addarc(${f(-R)},0,${f(R)},0,180,5)`); };
+  // 형상: 원(라미OD·보어·로터OD·로터철심OD·샤프트) + 슬롯 + 자석
+  arc(Rlam); arc(Rb); arc(Rro); arc(Rmi); arc(Rsh);
+  for (let i = 0; i < Ns; i++) seg(rot(sp, geo.statorRot * D2R + i * 2 * Math.PI / Ns));
+  for (let k = 0; k < poles; k++) seg(rot(mp, geo.rotorRot * D2R + k * 2 * Math.PI / poles));
+  // 블록 라벨
+  const label = (x, y, mat, magdir, group, extra) => L.push(`mi_addblocklabel(${f(x)},${f(y)})`, `mi_selectlabel(${f(x)},${f(y)})`,
+    `mi_setblockprop('${mat}',1,0,'<None>',${magdir},${group},0)`, "mi_clearselected()", ...(extra ? [extra] : []));
+  label(0, (Rd + Rlam) / 2, "M-19 Steel", 0, 0);                 // 스테이터 백아이언
+  label((Rsh + Rmi) / 2, 0, "M-19 Steel", 0, 1);                 // 로터 철심 (group1=회전자)
+  label(Rsh / 2, 0, "Air", 0, 1);                                // 샤프트(비자성 가정)
+  label((Rro + Rb) / 2, 0, "Air", 0, 0);                         // 에어갭
+  // 슬롯 코일: 슬롯별 정전류밀도 J [MA/m²]
+  for (let i = 0; i < Ns; i++) {
+    const netAT = tbl[i][0] * ia + tbl[i][1] * ib + tbl[i][2] * ic;
+    const J = netAT / slotA / 1e6;
+    L.push(`mi_addmaterial('Coil${i}',1,1,0,${J.toFixed(5)},0,0,0,1,0,0,0,0,0)`);
+    const a = geo.statorRot * D2R + i * 2 * Math.PI / Ns, rr = Rb + 0.45 * geo.slotDepth;
+    label(rr * Math.cos(a), rr * Math.sin(a), `Coil${i}`, 0, 0);
+  }
+  // 자석: 극마다 자화방향(반경, N/S 교번)
+  for (let k = 0; k < poles; k++) {
+    const a = geo.rotorRot * D2R + k * 2 * Math.PI / poles, rr = (Rro + Rmi) / 2;
+    const magdir = (a / D2R) + (k % 2 ? 180 : 0);               // 교번 극성
+    L.push(`mi_addblocklabel(${f(rr * Math.cos(a))},${f(rr * Math.sin(a))})`, `mi_selectlabel(${f(rr * Math.cos(a))},${f(rr * Math.sin(a))})`,
+      `mi_setblockprop('PM',1,0,'<None>',${magdir.toFixed(2)},1,0)`, "mi_clearselected()");
+  }
+  // 경계조건 + 해석
+  L.push(`mi_makeABC(7,${f(Rlam * 1.25)},0,0,0)`, "mi_zoomnatural()", "mi_saveas('mini_motorcad.fem')",
+    "mi_createmesh()", "mi_analyze(0)", "mi_loadsolution()",
+    "-- 토크(회전자 group1, 가중응력텐서)", "mo_clearblock(); mo_groupselectblock(1)",
+    "print('Torque [Nm] =', mo_blockintegral(22))", "mo_clearblock()",
+    "mo_showdensityplot(1,0,2.0,0,'mag')   -- 자속밀도 컬러맵",
+    `-- 운전점: A상 피크 ia=${ia.toFixed(2)} ib=ic=${ib.toFixed(2)} A (피크), 적층 ${depth}mm`);
+  return L.join("\n");
+}
+
 export default function MiniMotorCad() {
   const [tab, setTab] = useState("geometry");
   const [geo, setGeo] = useState(GEO0);
@@ -631,6 +689,12 @@ export default function MiniMotorCad() {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = "motor_design.json"; a.click();
   };
+  const exportFemm = () => {
+    if (!res) { alert("결과 없음 — 입력 확인"); return; }
+    const blob = new Blob([femmLua(geo, wind, calc, res)], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "mini_motorcad_femm.lua"; a.click();
+  };
 
   const TABS = [
     ["geometry", "Geometry"], ["winding", "Winding"], ["materials", "Materials"],
@@ -650,6 +714,9 @@ export default function MiniMotorCad() {
             <input type="checkbox" checked={showRef} onChange={(e) => setShowRef(e.target.checked)} />
             Motor-CAD 참조값 표시
           </label>
+          <button onClick={exportFemm} className="text-xs px-3 py-1 rounded font-medium mb-1" style={{ border: "1px solid #1B7A2B", color: "#1B7A2B", background: "#fff" }}>
+            FEMM 스크립트 (FEA)
+          </button>
           <button onClick={exportAll} className="text-xs px-3 py-1 rounded text-white font-medium mb-1" style={{ background: "#B5622D" }}>
             설계 JSON 내보내기
           </button>
