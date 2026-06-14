@@ -373,7 +373,7 @@ function windingAnalysis(Ns, poles, throw_, Nc) {
 
 // ─── 재질 DB ─────────────────────────────────────────────────────
 const STEELS = {
-  "20PNX1200F": { density: 7650, kh: 0.0226, ke: 4.43e-5, thk: 0.2 },
+  "20PNX1200F": { density: 7650, kh: 0.0212, ke: 4.157e-5, thk: 0.2 },
   "35PN230":    { density: 7600, kh: 0.028,  ke: 9.0e-5,  thk: 0.35 },
   "50PN470":    { density: 7700, kh: 0.038,  ke: 2.2e-4,  thk: 0.5 },
 };
@@ -610,7 +610,7 @@ const WIND0 = {
   strands: 17, connection: "delta", linerThk: 0.5, coilDivider: 0.5,
   wedgeDepth: 1.0, condSep: 0.02, wedgeModel: "wedge",
 };
-const MAT0 = { steel: "20PNX1200F", magnet: "N45UH", Br20: 1.32, tcBr: -0.12, mur: 1.05, kh: 0.0226, ke: 4.43e-5 };
+const MAT0 = { steel: "20PNX1200F", magnet: "N45UH", Br20: 1.32, tcBr: -0.12, mur: 1.05, kh: 0.0212, ke: 4.157e-5 };
 const CALC0 = { speed: 3200, Vdc: 48, IlineRms: 24.8, phaseAdv: 0, Tcu: 80, Tmag: 80, klk: 0.97, cT: 0.56, cL: 2.6, cLs: 0.33, cAC: 1.0, otherLoss: 6.7, currentDef: "rms", magnetisation: "parallel", driveMode: "sine" };
 
 // 1250W-jk Motor-CAD 참조값 (비교 표시용)
