@@ -36,8 +36,14 @@ def seg(pr):
 
 
 def arc(R):
-    femm.mi_addarc(R, 0, -R, 0, 180, 5)
-    femm.mi_addarc(-R, 0, R, 0, 180, 5)
+    # 90° 아크 4개로 원 (180° 반원은 FEMM 내부오류 유발 가능)
+    pts = [(R, 0), (0, R), (-R, 0), (0, -R)]
+    for x, y in pts:
+        femm.mi_addnode(x, y)
+    for i in range(4):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % 4]
+        femm.mi_addarc(x1, y1, x2, y2, 90, 2.5)
 
 
 def label(x, y, mat, magdir=0, group=0):
