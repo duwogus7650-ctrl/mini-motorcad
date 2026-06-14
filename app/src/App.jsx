@@ -1011,7 +1011,7 @@ export default function MiniMotorCad() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden">
-        {tab === "geometry" && <GeometryTab geo={geo} sG={sG} res={res} />}
+        {tab === "geometry" && <GeometryTab geo={geo} sG={sG} res={res} resetGeo={() => setGeo(GEO0)} />}
         {tab === "winding" && <WindingTab geo={geo} wind={wind} sW={sW} res={res} showRef={showRef} />}
         {tab === "materials" && <MaterialsTab mat={mat} sM={sM} res={res} showRef={showRef} />}
         {tab === "calculation" && <CalculationTab geo={geo} calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} femmCal={femmCal} setFemmCal={setFemmCal} />}
@@ -1025,7 +1025,7 @@ export default function MiniMotorCad() {
 }
 
 // ─── Geometry 탭 (DXF 매칭) ──────────────────────────────────────
-function GeometryTab({ geo, sG, res }) {
+function GeometryTab({ geo, sG, res, resetGeo }) {
   const [dxf, setDxf] = useState(null);
   const [dxfName, setDxfName] = useState("");
   const [autoInfo, setAutoInfo] = useState(null);
@@ -1239,6 +1239,10 @@ function GeometryTab({ geo, sG, res }) {
               측정 {measure ? "ON" : "OFF"}
             </button>
           </div>
+          <button onClick={() => { if (confirm("형상을 1250W-jk 기준값으로 되돌립니다. 진행할까요?")) resetGeo(); }}
+            className="text-xs px-2 py-1 rounded" style={{ border: "1px solid #22304d", background: "#101a30", color: "#7e8eac" }}>
+            ⟲ 기준형상 리셋 (1250W)
+          </button>
           <button onClick={autoExtract} className="text-xs px-2 py-1.5 rounded text-white font-medium"
             style={{ background: "#1B7A2B", cursor: "pointer" }}>
             ⚙ 형상 추출 (치수·슬롯/극수){!dxf && " · DXF 선택"}
