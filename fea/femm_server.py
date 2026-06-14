@@ -113,12 +113,10 @@ def build(d):
     OFF = 0.06                                     # rad (~3.4°) 라벨 위치 오프셋
     aT = math.pi / Ns                              # 치 중앙 (이미 비축)
     label((Rb + Rd) / 2 * math.cos(aT), (Rb + Rd) / 2 * math.sin(aT), 'M-19 Steel', 0, 0)
-    # 에어갭 공기 라벨 — 치 선단/자석으로 분절될 수 있어 여러 각도에 도배(같은 Air, 충돌 없음)
-    rG = (Rro + 3 * Rb) / 4                         # 보어쪽(상부) → group1 미포함
-    nAir = max(Ns, poles) * 2
-    for j in range(nAir):
-        aG = 2 * math.pi * (j + 0.5) / nAir
-        label(rG * math.cos(aG), rG * math.sin(aG), 'Air', 0, 0)
+    # 에어갭 공기 라벨 — 연결된 단일 영역이므로 1개만 (자석0 위, 보어쪽=group1 제외, 축선 비켜)
+    rG = (Rro + 3 * Rb) / 4
+    aG = rROT + OFF
+    label(rG * math.cos(aG), rG * math.sin(aG), 'Air', 0, 0)
     rR = Rmi * 0.5
     label(rR * math.cos(rROT + OFF), rR * math.sin(rROT + OFF), 'M-19 Steel', 0, 1)   # 로터 중심부(샤프트+철심)
     for i in range(Ns):
