@@ -106,8 +106,9 @@ def build(d):
         lo = rotpt(mLo, rROT + (k + 1) * 2 * math.pi / poles)
         femm.mi_addarc(hi[0], hi[1], lo[0], lo[1], polePitch - 2 * magHalfDeg, 2.5)
 
-    # 블록 라벨
-    aT = math.pi / Ns                              # 치 중앙
+    # 블록 라벨 — 모든 라벨을 축선(x/y축)에서 살짝 비켜 찍는다(OFF). 축 위면 영역 인식 실패.
+    OFF = 0.06                                     # rad (~3.4°) 라벨 위치 오프셋
+    aT = math.pi / Ns                              # 치 중앙 (이미 비축)
     label((Rb + Rd) / 2 * math.cos(aT), (Rb + Rd) / 2 * math.sin(aT), 'M-19 Steel', 0, 0)
     # 에어갭 공기 라벨 — 치 선단/자석으로 분절될 수 있어 여러 각도에 도배(같은 Air, 충돌 없음)
     rG = (Rro + 3 * Rb) / 4                         # 보어쪽(상부) → group1 미포함
@@ -116,16 +117,17 @@ def build(d):
         aG = 2 * math.pi * (j + 0.5) / nAir
         label(rG * math.cos(aG), rG * math.sin(aG), 'Air', 0, 0)
     rR = (Rsh + Rmi) / 2
-    label(rR * math.cos(rROT), rR * math.sin(rROT), 'M-19 Steel', 0, 1)   # 로터 철심
-    label(Rsh / 2, 0.001, 'Air', 0, 1)                                    # 샤프트(비자성)
+    label(rR * math.cos(rROT + OFF), rR * math.sin(rROT + OFF), 'M-19 Steel', 0, 1)   # 로터 철심
+    label(Rsh / 2 * math.cos(OFF), Rsh / 2 * math.sin(OFF), 'Air', 0, 1)              # 샤프트(비자성)
     for i in range(Ns):
-        a = sROT + i * 2 * math.pi / Ns
+        a = sROT + i * 2 * math.pi / Ns + OFF
         rr = Rb + 0.45 * slotDepth
         label(rr * math.cos(a), rr * math.sin(a), 'Coil%d' % i, 0, 0)
     for k in range(poles):
-        a = rROT + k * 2 * math.pi / poles
+        ac = rROT + k * 2 * math.pi / poles        # 자석 중심각(자화방향용)
+        a = ac + OFF                               # 라벨 위치(비축)
         rr = (Rmi + Rro) / 2
-        magdir = math.degrees(a) + (180 if k % 2 else 0)
+        magdir = math.degrees(ac) + (180 if k % 2 else 0)
         femm.mi_addblocklabel(rr * math.cos(a), rr * math.sin(a))
         femm.mi_selectlabel(rr * math.cos(a), rr * math.sin(a))
         femm.mi_setblockprop('PM', 1, 0, '<None>', magdir, 1, 0)
@@ -136,7 +138,7 @@ def build(d):
     femm.mi_setgroup(1)
     femm.mi_clearselected()
     femm.mi_makeABC(7, Rlam * 1.25, 0, 0, 0)
-    label(Rlam * 1.12, 0.001, 'Air', 0, 0)         # 외부 공기 (모델 OD ~ ABC 경계)
+    label(Rlam * 1.12 * math.cos(0.06), Rlam * 1.12 * math.sin(0.06), 'Air', 0, 0)  # 외부 공기(비축)
     femm.mi_zoomnatural()
     femm.mi_saveas('mini_motorcad.fem')
 
