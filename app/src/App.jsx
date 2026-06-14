@@ -740,6 +740,110 @@ function femmLua(geo, wind, calc, res) {
   return L.join("\n");
 }
 
+// ─── Self-Check 탭 (자동 검증: 참조 대조·물리 타당성·FEA 교차검증) ─────
+function SelfCheckTab({ res, calc, wind, femmCal, solved }) {
+  if (!res) return <div className="p-6 text-sm" style={{ color: UI.label }}>해석 결과 없음 — Calculation 탭에서 Solve 하세요.</div>;
+  const dev = (c, r) => (r ? ((c - r) / r) * 100 : 0);
+  const devColor = (d) => (Math.abs(d) < 2 ? UI.green : Math.abs(d) < 8 ? UI.amber : UI.red);
+  const refRows = [
+    ["평균 토크", res.torque, REF.torque, "Nm"],
+    ["역기전력 상수 Ke", res.Ke, REF.Ke, "V·s/rad"],
+    ["쇄교자속 λ", res.lambda, REF.lambda, "Wb"],
+    ["역기전력 피크", res.Epk, REF.Epk, "V"],
+    ["상저항 Rphase", res.Rphase, REF.Rphase, "Ω"],
+    ["동손 Pcu", res.Pcu, REF.Pcu, "W"],
+    ["철손 Pfe", res.Pfe, REF.Pfe, "W"],
+    ["효율", res.eff, REF.eff, "%"],
+    ["치 자속 Bt", res.Bt, REF.Bt, "T"],
+    ["요크 자속 By", res.By, REF.By, "T"],
+    ["권선계수 kw1", res.kw1, REF.kw1, ""],
+    ["전류밀도 Jrms", res.Jrms, REF.Jrms, "A/mm²"],
+  ].map((r) => ({ ...r, d: dev(r[1], r[2]) }));
+  const refWorst = Math.max(...refRows.map((r) => Math.abs(r.d)));
+  // 물리 타당성 (pass/warn)
+  const finite = [res.torque, res.eff, res.Ke, res.Rphase, res.lambda].every(Number.isFinite);
+  const pbal = Math.abs(res.Pin - (res.Pout + res.PcuAC + res.Pfe + calc.otherLoss));
+  const phys = [
+    ["효율 범위 0~100%", res.eff > 0 && res.eff < 100, res.eff.toFixed(1) + " %"],
+    ["치 자속 포화 여유 (Bt<2.2T)", res.Bt < 2.2, res.Bt.toFixed(2) + " T"],
+    ["요크 자속 포화 여유 (By<2.0T)", res.By < 2.0, res.By.toFixed(2) + " T"],
+    ["전류밀도 (Jrms<12 A/mm²)", res.Jrms < 12, res.Jrms.toFixed(2) + " A/mm²"],
+    ["나동선 점적률 (<55%)", res.cuSlotFill < 0.55, (res.cuSlotFill * 100).toFixed(1) + " %"],
+    ["운전속도 < 무부하속도", calc.speed < res.noLoadSpeed, Math.round(calc.speed) + " / " + Math.round(res.noLoadSpeed) + " rpm"],
+    ["권선 3상 균형", res.wa ? res.wa.balanced !== false : true, res.wa && res.wa.coilsPerPhaseAll ? res.wa.coilsPerPhaseAll.join("/") : "—"],
+    ["전력수지 일관 (Pin=Pout+손실)", pbal < 0.5, pbal.toFixed(3) + " W"],
+    ["핵심값 유한 (NaN 없음)", finite, finite ? "OK" : "NaN!"],
+  ];
+  const physWarn = phys.filter((p) => !p[1]).length;
+  // FEA 교차검증 (FEMM 보정값 있을 때)
+  const fea = femmCal ? [
+    ["FEMM Ke", femmCal.ke, REF.Ke, "V·s/rad"],
+    ["FEMM 토크", femmCal.torqueFea, REF.torque, "Nm"],
+    ...(Number.isFinite(femmCal.Bt) ? [["FEMM 치 자속 Bt", femmCal.Bt, REF.Bt, "T"]] : []),
+  ].map((r) => ({ ...r, d: dev(r[1], r[2]) })) : null;
+  const dot = (c) => <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: c, boxShadow: `0 0 6px ${c}aa` }} />;
+  const overall = refWorst < 8 && physWarn === 0 ? UI.green : refWorst < 15 && physWarn <= 1 ? UI.amber : UI.red;
+  return (
+    <div className="h-full overflow-auto p-3 flex flex-wrap gap-3 items-start" style={{ alignContent: "flex-start" }}>
+      <div className="w-full rounded p-3 flex items-center gap-3" style={{ background: UI.panel, border: `1px solid ${overall}66`, boxShadow: `0 0 14px ${overall}22` }}>
+        {dot(overall)}
+        <span style={{ color: UI.head, fontWeight: 700, letterSpacing: "0.04em" }}>
+          SELF-CHECK {overall === UI.green ? "정상" : overall === UI.amber ? "주의" : "경고"}
+        </span>
+        <span className="text-xs" style={{ color: UI.label }}>참조 최대편차 {refWorst.toFixed(1)}% · 물리 경고 {physWarn}건{femmCal ? " · FEA 보정 적용중" : ""}</span>
+      </div>
+
+      <div className="flex-1 min-w-80">
+        <Panel title="참조값(1250W Motor-CAD) 대조">
+          <table className="w-full text-xs"><tbody>
+            <tr style={{ color: UI.faint }}><td className="px-2 py-1">항목</td><td className="px-2 py-1 text-right">계산</td><td className="px-2 py-1 text-right">참조</td><td className="px-2 py-1 text-right">편차</td><td className="px-2 py-1 text-center">상태</td></tr>
+            {refRows.map((r) => (
+              <tr key={r[0]} style={{ borderTop: `1px solid ${UI.border}` }}>
+                <td className="px-2 py-1" style={{ color: UI.text }}>{r[0]}</td>
+                <td className="px-2 py-1 text-right" style={{ fontFamily: UI.mono, color: UI.head }}>{(+r[1]).toFixed(4)}</td>
+                <td className="px-2 py-1 text-right" style={{ fontFamily: UI.mono, color: UI.label }}>{r[2]}{r[3] && <span style={{ color: UI.faint }}> {r[3]}</span>}</td>
+                <td className="px-2 py-1 text-right" style={{ fontFamily: UI.mono, color: devColor(r.d) }}>{r.d >= 0 ? "+" : ""}{r.d.toFixed(1)}%</td>
+                <td className="px-2 py-1 text-center">{dot(devColor(r.d))}</td>
+              </tr>
+            ))}
+          </tbody></table>
+          <div className="px-2 py-1.5 text-xs" style={{ color: UI.faint }}>초록 &lt;2% · 주황 &lt;8% · 빨강 ≥8%. 입력을 바꿔 편차가 커지면 즉시 표시됩니다.</div>
+        </Panel>
+      </div>
+
+      <div className="flex-1 min-w-72">
+        <Panel title="물리 타당성">
+          <table className="w-full text-xs"><tbody>
+            {phys.map((p) => (
+              <tr key={p[0]} style={{ borderTop: `1px solid ${UI.border}` }}>
+                <td className="px-2 py-1.5 text-center" style={{ width: 24 }}>{dot(p[1] ? UI.green : UI.red)}</td>
+                <td className="px-2 py-1.5" style={{ color: UI.text }}>{p[0]}</td>
+                <td className="px-2 py-1.5 text-right" style={{ fontFamily: UI.mono, color: p[1] ? UI.label : UI.red }}>{p[2]}</td>
+              </tr>
+            ))}
+          </tbody></table>
+        </Panel>
+        {fea && (
+          <div className="mt-2.5"><Panel title="FEA 교차검증 (FEMM ↔ 참조)" accent={UI.green}>
+            <table className="w-full text-xs"><tbody>
+              {fea.map((r) => (
+                <tr key={r[0]} style={{ borderTop: `1px solid ${UI.border}` }}>
+                  <td className="px-2 py-1" style={{ color: UI.text }}>{r[0]}</td>
+                  <td className="px-2 py-1 text-right" style={{ fontFamily: UI.mono, color: UI.head }}>{(+r[1]).toFixed(4)}</td>
+                  <td className="px-2 py-1 text-right" style={{ fontFamily: UI.mono, color: UI.label }}>{r[2]}</td>
+                  <td className="px-2 py-1 text-right" style={{ fontFamily: UI.mono, color: devColor(r.d) }}>{r.d >= 0 ? "+" : ""}{r.d.toFixed(1)}%</td>
+                  <td className="px-2 py-1 text-center">{dot(devColor(r.d))}</td>
+                </tr>
+              ))}
+            </tbody></table>
+            <div className="px-2 py-1.5 text-xs" style={{ color: UI.faint }}>FEMM 해석 후 "보정 적용"하면 표시됩니다 (독립 FEA가 참조와 일치하는지).</div>
+          </Panel></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function MiniMotorCad() {
   const [tab, setTab] = useState("geometry");
   const [geo, setGeo] = useState(GEO0);
@@ -858,6 +962,7 @@ export default function MiniMotorCad() {
   const TABS = [
     ["geometry", "Geometry"], ["winding", "Winding"], ["materials", "Materials"],
     ["calculation", "Calculation"], ["output", "Output Data"], ["graphs", "Graphs"], ["thermal", "Thermal"],
+    ["selfcheck", "Self-Check"],
   ];
 
   return (
@@ -913,6 +1018,7 @@ export default function MiniMotorCad() {
         {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} solved={solved} />}
         {tab === "graphs" && <GraphsTab res={res} calc={calc} solved={solved} />}
         {tab === "thermal" && <ThermalTab geo={geo} wind={wind} calc={calc} res={res} therm={therm} sT={sT} solved={solved} />}
+        {tab === "selfcheck" && <SelfCheckTab res={res} calc={calc} wind={wind} femmCal={femmCal} solved={solved} />}
       </div>
     </div>
   );
