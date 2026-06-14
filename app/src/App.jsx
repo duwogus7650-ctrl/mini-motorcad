@@ -458,10 +458,13 @@ function compute(G, W, M, C, cal) {
   out.ewdgFill = ewdgRegion > 0 ? out.volCuEwdg * (W.wireDia / W.copperDia) ** 2 / ewdgRegion : 0;
 
   // 자속밀도 (FSCW 보정)
-  out.Bt = C.cT * Bgpk * taus / G.toothWidth;
+  // 치·요크 자속밀도 — FEMM 보정 시 FEMM 측정값 사용(철손이 FEMM 기반이 됨), 아니면 해석식.
+  const BtAnalytic = C.cT * Bgpk * taus / G.toothWidth;
   const byDepth = G.statorLamDia / 2 - Bore / 2 - G.slotDepth;
   out.byDepth = byDepth;
-  out.By = out.Bt * G.toothWidth / (2 * byDepth);
+  const ByAnalytic = BtAnalytic * G.toothWidth / (2 * byDepth);
+  out.Bt = (cal && Number.isFinite(cal.Bt)) ? cal.Bt : BtAnalytic;
+  out.By = (cal && Number.isFinite(cal.By)) ? cal.By : ByAnalytic;
 
   // 중량
   const Lstk = G.stackLength;
@@ -1586,14 +1589,19 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
             <table className="w-full"><tbody>
               <Row label="평균 토크 (FEA)" value={femmRes.avgTorque.toFixed(3)} unit="Nm" hl />
               <Row label="토크 리플 (FEA)" value={femmRes.torqueRipple.toFixed(2)} unit="%" />
-              <Row label="코깅 토크 p-p (FEA)" value={femmRes.coggingPP.toFixed(1)} unit="mNm" />
+              <Row label="코깅 p-p (FEA) ⚠ 메시한계·참고만" value={femmRes.coggingPP.toFixed(1)} unit="mNm" />
               <Row label="에어갭 자속밀도 (FEA)" value={femmRes.Bg.toFixed(3)} unit="T" />
               {Number.isFinite(femmRes.Ke) && <Row label="역기전력 상수 Ke (FEA)" value={femmRes.Ke.toFixed(4)} unit="V·s/rad" />}
               {Number.isFinite(femmRes.BEMFpk) && <Row label="무부하 역기전력 피크 (FEA)" value={femmRes.BEMFpk.toFixed(2)} unit="V" />}
+              {Number.isFinite(femmRes.Bt) && <Row label="치 자속밀도 (FEA, 부하)" value={femmRes.Bt.toFixed(3)} unit="T" />}
+              {Number.isFinite(femmRes.By) && <Row label="요크 자속밀도 (FEA, 부하)" value={femmRes.By.toFixed(3)} unit="T" />}
               <tr><td colSpan={3} style={{ borderTop: "1px solid #BBD9C0" }} /></tr>
               <Row label="해석식 토크 (비교)" value={res.torque.toFixed(3)} unit="Nm" />
               {Number.isFinite(femmRes.Ke) && <Row label="해석식 Ke (비교)" value={res.Ke.toFixed(4)} unit="V·s/rad" />}
             </tbody></table>
+            <div className="px-2 py-1 text-xs" style={{ color: "#B26A00", background: "#FFF8EC", borderTop: "1px solid #BBD9C0" }}>
+              ⚠ 코깅 토크는 빠른 메시의 토크 계산 노이즈(~수십 mNm)보다 작아 <b>신뢰 불가</b>입니다. 정밀 코깅은 Maxwell/전용 미세메시 해석을 참조하세요. (토크·Ke·효율은 검증됨)
+            </div>
             {Number.isFinite(femmRes.Ke) && res.pp > 0 && (
               <div className="p-2" style={{ borderTop: "1px solid #BBD9C0" }}>
                 {femmCal ? (
@@ -1606,7 +1614,8 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
                     const lamF = femmRes.Ke / res.pp;
                     const Tlam = 1.5 * res.pp * lamF * (res.IphRms * Math.SQRT2) * Math.cos(calc.phaseAdv * D2R);
                     const kT = (Math.abs(Tlam) > 1e-3 && Number.isFinite(femmRes.avgTorque)) ? femmRes.avgTorque / Tlam : 1;
-                    setFemmCal({ lam: lamF, ke: femmRes.Ke, kT, torqueFea: femmRes.avgTorque, source: "FEMM" });
+                    setFemmCal({ lam: lamF, ke: femmRes.Ke, kT, torqueFea: femmRes.avgTorque,
+                      Bt: femmRes.Bt, By: femmRes.By, source: "FEMM" });
                   }}
                     className="w-full py-2 rounded text-xs font-semibold"
                     style={{ border: "1px solid #1B7A2B", background: "#1B7A2B", color: "#fff" }}>
@@ -1964,8 +1973,15 @@ function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
         <rect x={P.l} y={P.t} width={Wp - P.l - P.r} height={cbH} fill="#1f2540" />
         <g clipPath="url(#effclip)">{cells}{contourEls}{labelEls}</g>
         <polyline fill="none" stroke="#111" strokeWidth="1.6" points={envPts} />
-        {op && op.torque <= yMax && <g><circle cx={sx(op.speed)} cy={sy(op.torque)} r="4.5" fill="#fff" stroke="#111" strokeWidth="1.8" />
-          <text x={sx(op.speed) + 7} y={sy(op.torque) - 5} fontSize="10" fontWeight="bold" fill="#111">정격</text></g>}
+        {op && op.torque <= yMax && (() => {
+          const lx = sx(op.speed), ly = sy(op.torque);
+          const right = lx < (P.l + Wp - P.r) * 0.62;      // 오른쪽 여백 없으면 왼쪽에 표기
+          const tx = right ? lx + 8 : lx - 8, anc = right ? "start" : "end";
+          return <g><circle cx={lx} cy={ly} r="4.5" fill="#fff" stroke="#111" strokeWidth="1.8" />
+            <text x={tx} y={ly - 6} fontSize="9.5" fontWeight="bold" fill="#111" textAnchor={anc}>정격 운전점</text>
+            <text x={tx} y={ly + 5} fontSize="9" fill="#111" textAnchor={anc}>{Math.round(op.speed)}rpm · {op.torque.toFixed(2)}Nm · {op.eff != null ? op.eff.toFixed(1) + "%" : ""}</text>
+          </g>;
+        })()}
         {Array.from({ length: 6 }, (_, i) => { const xv = xMax * i / 5; return <text key={"x" + i} x={sx(xv)} y={h - P.b + 12} fontSize="9" fill="#5C6B7A" textAnchor="middle">{Math.round(xv)}</text>; })}
         {Array.from({ length: 5 }, (_, i) => { const yv = yMax * i / 4; return <text key={"y" + i} x={P.l - 4} y={sy(yv) + 3} fontSize="9" fill="#5C6B7A" textAnchor="end">{yv.toFixed(1)}</text>; })}
         <text x={(P.l + Wp - P.r) / 2} y={h - 2} fontSize="9" fill="#8893A0" textAnchor="middle">Speed [rpm]</text>
@@ -2131,18 +2147,18 @@ function GraphsTab({ res, calc, solved }) {
         ]} />
       <Bars title="MMF Harmonics" sub="공간(기계) 고조파 [At] — 극쌍수에서 피크" values={data.mag} />
       <PhasorPlot chains={data.chains} />
-      <Plot title="Torque–Speed Curve" sub={"기저속도 ~" + Math.round(data.baseSpeed) + " rpm · 전류원 한계 = 동작 전류"}
+      <Plot title="Torque–Speed Curve" sub={"기저속도 ~" + Math.round(data.baseSpeed) + " rpm · 정격점 " + Math.round(data.opSpeed) + "rpm / " + data.opTorque.toFixed(2) + "Nm"}
         series={[
           { x: data.tnSpeed, y: data.tnTorque, color: "#2244CC", label: "Max Torque [Nm]" },
-          { x: [data.opSpeed, data.opSpeed], y: [0, data.opTorque], color: "#D98E04", label: "정격점" },
+          { x: [data.opSpeed, data.opSpeed], y: [0, data.opTorque], color: "#D98E04", label: "정격점 " + Math.round(data.opSpeed) + "rpm/" + data.opTorque.toFixed(2) + "Nm" },
         ]} />
-      <Plot title="Power–Speed Curve" sub={"최대 출력 " + Math.round(data.tnPmax) + " W · 전압한계 = 무부하속도 " + Math.round(res.noLoadSpeed) + " rpm"}
+      <Plot title="Power–Speed Curve" sub={"최대 출력 " + Math.round(data.tnPmax) + " W · 정격점 " + Math.round(data.opSpeed) + "rpm / " + Math.round(data.opTorque * data.opSpeed * 2 * Math.PI / 60) + "W"}
         series={[
           { x: data.tnSpeed, y: data.tnPower, color: "#1B7A2B", label: "Output Power [W]" },
-          { x: [data.opSpeed, data.opSpeed], y: [0, data.opTorque * data.opSpeed * 2 * Math.PI / 60], color: "#D98E04", label: "정격점" },
+          { x: [data.opSpeed, data.opSpeed], y: [0, data.opTorque * data.opSpeed * 2 * Math.PI / 60], color: "#D98E04", label: "정격점 " + Math.round(data.opTorque * data.opSpeed * 2 * Math.PI / 60) + "W" },
         ]} />
       <EffMap speeds={data.effSpeeds} torques={data.effTorques} grid={data.effGrid}
-        env={{ x: data.tnSpeed, y: data.tnTorqueP }} op={{ speed: data.opSpeed, torque: data.opTorque }} />
+        env={{ x: data.tnSpeed, y: data.tnTorqueP }} op={{ speed: data.opSpeed, torque: data.opTorque, eff: res.eff }} />
       <div className="w-full text-xs" style={{ color: "#8893A0" }}>
         모든 파형은 해석식 합성 추정치 — 슬롯팅·포화·코깅 미반영. 정밀 파형은 Motor-CAD/Maxwell FEA로 검증.
       </div>

@@ -237,6 +237,24 @@ def airgap_bn(d, npts=180):
     return bmax
 
 
+def sample_iron(d, sROT):
+    """현재 해를 기준으로 치(중심)·요크(중간) 자속밀도 |B| 최대 반환.
+    한 순간의 18개 치를 공간적으로 샘플 → 한 치가 1주기 동안 겪는 범위와 동일(대칭)."""
+    Ns = d['Ns']
+    Rb, Rd, Rlam = d['Rb'], d['Rb'] + d['slotDepth'], d['Rlam']
+    rt = (Rb + Rd) / 2          # 치 중간 반경
+    ry = (Rd + Rlam) / 2        # 요크(백아이언) 중간 반경
+    bt = by = 0.0
+    for i in range(Ns):
+        at = sROT + (i + 0.5) * 2 * math.pi / Ns       # 치 중심(슬롯 사이)
+        bx, byy = femm.mo_getb(rt * math.cos(at), rt * math.sin(at))
+        bt = max(bt, math.hypot(bx, byy))
+        ay = sROT + i * 2 * math.pi / Ns
+        bx2, by2 = femm.mo_getb(ry * math.cos(ay), ry * math.sin(ay))
+        by = max(by, math.hypot(bx2, by2))
+    return bt, by
+
+
 @app.route('/solve', methods=['POST'])
 def solve():
     d = request.get_json(force=True)
@@ -305,8 +323,9 @@ def solve():
             we = pp * speed * 2 * math.pi / 60.0
             BEMFpk = we * lam_pk                                   # V (피크 상 역기전력)
 
-            # 2) 부하 토크 (cogPeriod 1주기, 부하각 고정 동기전류) → 평균·리플
+            # 2) 부하 토크 (cogPeriod 1주기, 부하각 고정 동기전류) → 평균·리플 + 철심 자속밀도
             loadT = []
+            BtFea = ByFea = 0.0
             for s in range(nLoad):
                 ang = cogPeriod * s / nLoad
                 set_rotor(ang)
@@ -314,6 +333,8 @@ def solve():
                 set_currents(d, ia, ib, ic)
                 T = solve_torque()
                 loadT.append(T)
+                bt, by_ = sample_iron(d, sROT)              # 부하 시 치·요크 자속밀도(철손용)
+                BtFea = max(BtFea, bt); ByFea = max(ByFea, by_)
                 print('[solve] 부하 %d/%d  T=%.3f Nm' % (s + 1, nLoad, T), flush=True)
             avgT = sum(loadT) / len(loadT)
             ripT = (max(loadT) - min(loadT)) / abs(avgT) * 100 if abs(avgT) > 1e-6 else 0.0
@@ -332,10 +353,11 @@ def solve():
             femm.mo_close()
             femm.mi_close()
 
-            print('[solve] 완료 — 평균토크 %.3f Nm, 리플 %.1f%%, 코깅 %.1f mNm, Bg %.3f T, Ke %.4f'
-                  % (avgT, ripT, cogPP, Bg, Ke), flush=True)
+            print('[solve] 완료 — 평균토크 %.3f Nm, 리플 %.1f%%, 코깅 %.1f mNm, Bg %.3f T, Ke %.4f, Bt %.2f By %.2f'
+                  % (avgT, ripT, cogPP, Bg, Ke, BtFea, ByFea), flush=True)
             return jsonify(ok=True, avgTorque=avgT, torqueRipple=ripT,
                            coggingPP=cogPP, Bg=Bg, Ke=Ke, BEMFpk=BEMFpk,
+                           Bt=BtFea, By=ByFea,
                            loadT=loadT, cogT=cogT,
                            psiDeg=[math.degrees(x) for x in psi])
         except Exception as e:
