@@ -879,7 +879,7 @@ function GeometryTab({ geo, sG, res }) {
   ];
   const AFIELDS = [
     ["stackLength", "Stator Lam Length", 0.1], ["rotorLamLength", "Rotor Lam Length", 0.1],
-    ["magnetLength", "Magnet Length", 0.1], ["magneticLength", "Magnetic Axial Length", 0.1], ["motorLength", "Motor Length", 0.1],
+    ["magnetLength", "Magnet Length", 0.1], ["magneticLength", "Magnetic Axial Length", 0.1], ["motorLength", "Motor Length (전장·엔드와인딩 포함)", 0.1],
   ];
 
   return (
