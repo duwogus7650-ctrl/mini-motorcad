@@ -357,7 +357,7 @@ const WIRE_TABLES = {
 };
 
 // ─── 해석 엔진 (검증: 1250W-jk) ─────────────────────────────────
-function compute(G, W, M, C) {
+function compute(G, W, M, C, cal) {
   const out = {};
   const Ns = G.slotNumber, poles = G.poleNumber, pp = poles / 2;
   const Bore = G.statorBore, g = G.airgap, lm = G.magnetThickness;
@@ -385,20 +385,25 @@ function compute(G, W, M, C) {
   const D = Bore - g, taup = Math.PI * D / poles;
   const alpha = G.magnetArcED / 180;
   const L = G.magneticLength * 1e-3;
-  const lam = (2 / Math.PI) * kw1 * NphSeries * (alpha * Bgpk * C.klk) * (taup * 1e-3) * L;
-  out.lambda = lam; out.magnetAlpha = alpha;
+  // 쇄교자속 λ — FEMM 보정이 적용되면 FEMM에서 측정한 λ(=Ke/pp)를 그대로 사용.
+  // 그러면 토크·EMF·출력·T-N·효율맵 등 λ 의존 결과가 전부 FEMM 기반이 된다.
+  const lamAnalytic = (2 / Math.PI) * kw1 * NphSeries * (alpha * Bgpk * C.klk) * (taup * 1e-3) * L;
+  const lam = (cal && Number.isFinite(cal.lam)) ? cal.lam : lamAnalytic;
+  out.lambda = lam; out.lambdaAnalytic = lamAnalytic; out.magnetAlpha = alpha;
+  out.femmCal = (cal && Number.isFinite(cal.lam)) ? cal : null;
   const fe = C.speed / 60 * pp;
   out.fe = fe;
   out.Epk = 2 * Math.PI * fe * lam;
   out.Erms = out.Epk / Math.SQRT2;
   out.Ke = pp * lam;
+  out.pp = pp;
   const Iph = W.connection === "delta" ? C.IlineRms / Math.sqrt(3) : C.IlineRms;
   out.IphRms = Iph; out.IlineRms = C.IlineRms;
   const IphPk = Iph * Math.SQRT2;
   const Iq = IphPk * Math.cos(C.phaseAdv * D2R);
   out.torque = 1.5 * pp * lam * Iq;
-  out.Kt_phase = out.torque / Iph;
-  out.KtLine = out.torque / (C.IlineRms * Math.SQRT2);
+  out.Kt_phase = Iph > 0 ? out.torque / Iph : 0;
+  out.KtLine = C.IlineRms > 0 ? out.torque / (C.IlineRms * Math.SQRT2) : 0;
 
   // 슬롯/충전율
   const slotPath = buildSlotPath(G);
@@ -486,7 +491,7 @@ function compute(G, W, M, C) {
   out.Pem = out.torque * wm;
   out.Pin = out.Pem + out.PcuAC;
   out.Pout = out.Pem - out.Pfe - C.otherLoss;
-  out.Tshaft = out.Pout / wm;
+  out.Tshaft = wm > 0 ? out.Pout / wm : 0;
   out.eff = out.Pin > 0 ? (out.Pout / out.Pin) * 100 : 0;
   out.TRV = out.torque / (Math.PI * RoM ** 2 * Lstk * 1e-9) / 1000; // kNm/m³
 
@@ -512,9 +517,16 @@ function compute(G, W, M, C) {
   const RoMm = RoM * 1e-3, RiMm = RiM * 1e-3, Rshm = (G.shaftDia / 2) * 1e-3;
   out.Jrotor = 0.5 * out.mRotor * (RiMm ** 2 + Rshm ** 2) + 0.5 * out.mMagnet * (RoMm ** 2 + RiMm ** 2);
   const we = 2 * Math.PI * fe;
-  const Vq = out.Erms + out.Rphase * Iph, Vd = -we * out.Lq * 1e-3 * Iph;
-  out.Vterm = Math.hypot(Vq, Vd);
-  out.PF = out.Vterm > 0 ? Vq / out.Vterm : 0;
+  // 단자전압·역률 — 진각(phaseAdv)을 반영한 정식 dq 정상상태식.
+  // lam=피크 쇄교자속, IphPk=피크 상전류. 진각>0 → id<0(약계자). adv=0이면 기존식과 동일.
+  const adv = C.phaseAdv * D2R;
+  const idPk = -IphPk * Math.sin(adv);                 // d축 전류(피크)
+  const iqPk = IphPk * Math.cos(adv);                  // q축 전류(피크) = Iq
+  const LdH = out.Ld * 1e-3, LqH = out.Lq * 1e-3;
+  const VdPk = out.Rphase * idPk - we * LqH * iqPk;
+  const VqPk = out.Rphase * iqPk + we * (LdH * idPk + lam);
+  out.Vterm = Math.hypot(VdPk, VqPk) / Math.SQRT2;     // rms 상단자전압
+  out.PF = Math.cos(Math.atan2(VdPk, VqPk) - Math.atan2(idPk, iqPk));
   out.VsupplyRms = C.Vdc / Math.SQRT2;
   out.Istall = C.Vdc / out.RlineLine;
   out.Tstall = out.KtLine * out.Istall;
@@ -585,6 +597,20 @@ const Radio = ({ group, val, label, cur, onPick, disabled }) => (
 );
 const SectionHead = ({ color, children }) => (
   <div className="px-2 py-1 text-xs font-bold" style={{ background: "#E8EBEE", borderLeft: `3px solid ${color}` }}>{children}</div>
+);
+// fieldset 박스 — 반드시 모듈 레벨에 둘 것. 컴포넌트 내부에 정의하면 매 렌더마다
+// 새 컴포넌트 타입이 되어 자식 input 이 리마운트→입력 포커스가 풀린다.
+const Box = ({ title, children }) => (
+  <fieldset className="rounded px-2 pb-1.5 pt-0.5 mb-2" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
+    <legend className="text-xs px-1 font-semibold" style={{ color: "#2A3540" }}>{title}</legend>
+    {children}
+  </fieldset>
+);
+// 강판 선택 드롭다운 (Materials 탭). 동일 이유로 모듈 레벨.
+const SteelSel = ({ value, onPick }) => (
+  <select value={value} onChange={(e) => onPick(e.target.value)} className="text-xs px-1 py-0.5 rounded w-32" style={{ border: "1px solid #C8CFD6" }}>
+    {Object.keys(STEELS).map((k) => <option key={k}>{k}</option>)}
+  </select>
 );
 
 // 열등가회로 기본값 (집중정수, 정상상태). hConv: 자연대류 기본 10 W/m²K. housing 0 = 형상에서 자동.
@@ -660,14 +686,16 @@ export default function MiniMotorCad() {
   const [calc, setCalc] = useState(CALC0);
   const [therm, setTherm] = useState(THERM0);
   const [showRef, setShowRef] = useState(true);
+  // FEMM 보정: {lam, ke, source} — 적용 시 해석식 λ를 FEMM값으로 고정 → 모든 λ의존 결과가 FEMM 기반.
+  const [femmCal, setFemmCal] = useState(null);
 
   // 입력 도중(빈 칸→0 등) NaN/Infinity가 나오면 마지막 유효 결과를 유지
   const rawRes = useMemo(() => {
     try {
-      const r = compute(geo, wind, mat, calc);
+      const r = compute(geo, wind, mat, calc, femmCal);
       return ["torque", "Rphase", "slotArea", "eff", "kw1"].every((k) => isFinite(r[k])) ? r : null;
     } catch (e) { return null; }
-  }, [geo, wind, mat, calc]);
+  }, [geo, wind, mat, calc, femmCal]);
   const lastResRef = useRef(null);
   if (rawRes) lastResRef.current = rawRes;
   const res = rawRes || lastResRef.current;
@@ -676,6 +704,8 @@ export default function MiniMotorCad() {
   // E-Magnetic 결과는 Solve를 눌러야 표시 (Motor-CAD 흐름). 입력 변경 시 무효화.
   const [solved, setSolved] = useState(false);
   useEffect(() => { setSolved(false); }, [geo, wind, mat, calc]);
+  // 자기설계(형상·권선·재질)가 바뀌면 FEMM 보정은 무효 (운전점 calc 변경은 λ에 무관하므로 유지)
+  useEffect(() => { setFemmCal(null); }, [geo, wind, mat]);
 
   const sG = (k, v) => setGeo((p) => ({ ...p, [k]: v }));
   const sW = (k, v) => setWind((p) => ({ ...p, [k]: v }));
@@ -707,7 +737,7 @@ export default function MiniMotorCad() {
       <div style={{ background: "#FFFFFF", borderBottom: "2px solid #1A222C" }}>
         <div className="flex items-center gap-3 px-3 pt-2">
           <span className="font-bold text-sm tracking-tight">Mini Motor-CAD</span>
-          <span className="text-xs" style={{ color: "#8893A0" }}>PMSM 기초설계 · 해석엔진 1250W-jk 검증</span>
+          {femmCal && <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "#1B7A2B", color: "#fff" }}>FEMM 보정됨 (λ={femmCal.lam.toFixed(4)})</span>}
           {stale && <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "#7A1212", color: "#fff" }}>⚠ 입력값 비정상 — 마지막 유효 결과 표시 중</span>}
           <div className="flex-1" />
           <label className="text-xs flex items-center gap-1">
@@ -740,7 +770,7 @@ export default function MiniMotorCad() {
         {tab === "geometry" && <GeometryTab geo={geo} sG={sG} res={res} />}
         {tab === "winding" && <WindingTab geo={geo} wind={wind} sW={sW} res={res} showRef={showRef} />}
         {tab === "materials" && <MaterialsTab mat={mat} sM={sM} res={res} showRef={showRef} />}
-        {tab === "calculation" && <CalculationTab geo={geo} calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} />}
+        {tab === "calculation" && <CalculationTab geo={geo} calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} femmCal={femmCal} setFemmCal={setFemmCal} />}
         {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} solved={solved} />}
         {tab === "graphs" && <GraphsTab res={res} calc={calc} solved={solved} />}
         {tab === "thermal" && <ThermalTab geo={geo} wind={wind} calc={calc} res={res} therm={therm} sT={sT} solved={solved} />}
@@ -1353,11 +1383,6 @@ function MaterialsTab({ mat, sM, res, showRef }) {
   const pickSteel = (name) => { const s = STEELS[name]; sM("steel", name); sM("kh", s.kh); sM("ke", s.ke); };
   const pickMag = (name) => { const m = MAGNETS[name]; sM("magnet", name); sM("Br20", m.Br20); sM("tcBr", m.tc); sM("mur", m.mur); };
   const stl = STEELS[mat.steel], mg = MAGNETS[mat.magnet];
-  const SteelSel = () => (
-    <select value={mat.steel} onChange={(e) => pickSteel(e.target.value)} className="text-xs px-1 py-0.5 rounded w-32" style={{ border: "1px solid #C8CFD6" }}>
-      {Object.keys(STEELS).map((k) => <option key={k}>{k}</option>)}
-    </select>
-  );
   const td = "px-2 py-1 text-xs";
   const tdr = td + " text-right";
   const mono = { fontFamily: "Consolas,monospace" };
@@ -1381,14 +1406,14 @@ function MaterialsTab({ mat, sM, res, showRef }) {
           </tr>
         </thead>
         <tbody style={mono}>
-          <TR><td className={td}>Stator Lam (Back Iron)</td><td className={td}><SteelSel /></td><td className={tdr}>5.5E-07</td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>{stl.density}</td><td className={tdr}>{res.mBy.toFixed(4)}</td></TR>
-          <TR><td className={td}>Stator Lam (Tooth)</td><td className={td}><SteelSel /></td><td className={tdr}>5.5E-07</td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>{stl.density}</td><td className={tdr}>{res.mTooth.toFixed(4)}</td></TR>
+          <TR><td className={td}>Stator Lam (Back Iron)</td><td className={td}><SteelSel value={mat.steel} onPick={pickSteel} /></td><td className={tdr}>5.5E-07</td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>{stl.density}</td><td className={tdr}>{res.mBy.toFixed(4)}</td></TR>
+          <TR><td className={td}>Stator Lam (Tooth)</td><td className={td}><SteelSel value={mat.steel} onPick={pickSteel} /></td><td className={tdr}>5.5E-07</td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>{stl.density}</td><td className={tdr}>{res.mTooth.toFixed(4)}</td></TR>
           <TR total><td className={td}>Stator Lamination [Total]</td><td className={td}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>{res.mStator.toFixed(4)}{showRef && <span style={{ color: "#1B7A2B" }}> ({REF.mStator})</span>}</td></TR>
           <TR><td className={td}>Armature Winding [Active]</td><td className={td}>Copper (Pure)</td><td className={tdr}>1.724E-08</td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>8933</td><td className={tdr}>{res.mCuActive.toFixed(4)}</td></TR>
           <TR><td className={td}>Armature EWdg [Front]</td><td className={td}>Copper (Pure)</td><td className={tdr}>1.724E-08</td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>8933</td><td className={tdr}>{res.mCuEwdg.toFixed(4)}</td></TR>
           <TR><td className={td}>Armature EWdg [Rear]</td><td className={td}>Copper (Pure)</td><td className={tdr}>1.724E-08</td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>8933</td><td className={tdr}>{res.mCuEwdg.toFixed(4)}</td></TR>
           <TR total><td className={td}>Armature Winding [Total]</td><td className={td}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>{res.mCopper.toFixed(4)}{showRef && <span style={{ color: "#1B7A2B" }}> ({REF.mCopper})</span>}</td></TR>
-          <TR><td className={td}>Rotor Lam (Back Iron)</td><td className={td}><SteelSel /></td><td className={tdr}>5.5E-07</td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>{stl.density}</td><td className={tdr}>{res.mRotor.toFixed(4)}{showRef && <span style={{ color: "#1B7A2B" }}> ({REF.mRotor})</span>}</td></TR>
+          <TR><td className={td}>Rotor Lam (Back Iron)</td><td className={td}><SteelSel value={mat.steel} onPick={pickSteel} /></td><td className={tdr}>5.5E-07</td><td className={tdr}></td><td className={tdr}></td><td className={tdr}></td><td className={tdr}>{stl.density}</td><td className={tdr}>{res.mRotor.toFixed(4)}{showRef && <span style={{ color: "#1B7A2B" }}> ({REF.mRotor})</span>}</td></TR>
           <TR>
             <td className={td}>Magnet</td>
             <td className={td}>
@@ -1421,13 +1446,7 @@ function MaterialsTab({ mat, sM, res, showRef }) {
 }
 
 // ─── Calculation 탭 (Motor-CAD Drive 패널) ──────────────────────
-function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved }) {
-  const Box = ({ title, children }) => (
-    <fieldset className="rounded px-2 pb-1.5 pt-0.5 mb-2" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
-      <legend className="text-xs px-1 font-semibold" style={{ color: "#2A3540" }}>{title}</legend>
-      {children}
-    </fieldset>
-  );
+function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmCal, setFemmCal }) {
   const [femmRes, setFemmRes] = useState(null);
   const [femmBusy, setFemmBusy] = useState(false);
   const [femmErr, setFemmErr] = useState(null);
@@ -1437,19 +1456,26 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved }) {
     const Rb = geo.statorBore / 2, Rro = (geo.statorBore - 2 * geo.airgap) / 2;
     const payload = {
       Ns: geo.slotNumber, poles: geo.poleNumber, statorRot: geo.statorRot, rotorRot: geo.rotorRot,
-      depth: geo.stackLength, slotDepth: geo.slotDepth,
+      depth: geo.magneticLength, slotDepth: geo.slotDepth,    // 2D FEA 깊이 = 유효 자기길이(해석식 lam과 일치)
       Rlam: geo.statorLamDia / 2, Rb, Rro, Rmi: Rro - geo.magnetThickness, Rsh: geo.shaftDia / 2,
       slotPoly: buildSlotPath(geo), magnetPoly: buildMagnetPath(geo), slotTurns: res.wa.table,
       Ipk: res.IphRms * Math.SQRT2, Br: res.Br_used, slotArea: res.slotArea,
+      phaseAdv: calc.phaseAdv, parallelPaths: wind.parallelPaths, speed: calc.speed,
     };
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6 * 60 * 1000);   // 6분 타임아웃
     try {
-      const r = await fetch("http://localhost:8765/solve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const r = await fetch("http://localhost:8765/solve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: ctrl.signal });
+      if (!r.ok) { setFemmErr(`브릿지 서버 오류 (HTTP ${r.status}) — 서버 콘솔의 trace 확인`); return; }
       const j = await r.json();
-      if (j.ok) setFemmRes(j); else setFemmErr(j.error || "FEMM 해석 실패");
+      if (j.ok) setFemmRes(j); else setFemmErr(j.error || "FEMM 해석 실패 — 서버 콘솔 trace 확인");
     } catch (e) {
-      setFemmErr("브릿지 서버 연결 실패 — fea/femm_server.py 가 실행 중인지 확인 (python fea/femm_server.py)");
+      if (e.name === "AbortError") setFemmErr("FEMM 해석 시간 초과(6분) — 메시/스텝을 줄이거나 다시 시도");
+      else setFemmErr("브릿지 서버 연결 실패 — fea/femm_server.py 가 실행 중인지 확인 (python fea/femm_server.py)");
+    } finally {
+      clearTimeout(timer);
+      setFemmBusy(false);
     }
-    setFemmBusy(false);
   };
   const IlinePk = calc.IlineRms * Math.SQRT2;
   return (
@@ -1559,8 +1585,31 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved }) {
               <Row label="토크 리플 (FEA)" value={femmRes.torqueRipple.toFixed(2)} unit="%" />
               <Row label="코깅 토크 p-p (FEA)" value={femmRes.coggingPP.toFixed(1)} unit="mNm" />
               <Row label="에어갭 자속밀도 (FEA)" value={femmRes.Bg.toFixed(3)} unit="T" />
+              {Number.isFinite(femmRes.Ke) && <Row label="역기전력 상수 Ke (FEA)" value={femmRes.Ke.toFixed(4)} unit="V·s/rad" />}
+              {Number.isFinite(femmRes.BEMFpk) && <Row label="무부하 역기전력 피크 (FEA)" value={femmRes.BEMFpk.toFixed(2)} unit="V" />}
+              <tr><td colSpan={3} style={{ borderTop: "1px solid #BBD9C0" }} /></tr>
               <Row label="해석식 토크 (비교)" value={res.torque.toFixed(3)} unit="Nm" />
+              {Number.isFinite(femmRes.Ke) && <Row label="해석식 Ke (비교)" value={res.Ke.toFixed(4)} unit="V·s/rad" />}
             </tbody></table>
+            {Number.isFinite(femmRes.Ke) && res.pp > 0 && (
+              <div className="p-2" style={{ borderTop: "1px solid #BBD9C0" }}>
+                {femmCal ? (
+                  <button onClick={() => setFemmCal(null)} className="w-full py-2 rounded text-xs font-semibold"
+                    style={{ border: "1px solid #B26A00", background: "#FFF3E0", color: "#B26A00" }}>
+                    ✓ FEMM 보정 적용중 (λ={femmCal.lam.toFixed(4)}) — 클릭하면 해제
+                  </button>
+                ) : (
+                  <button onClick={() => setFemmCal({ lam: femmRes.Ke / res.pp, ke: femmRes.Ke, source: "FEMM" })}
+                    className="w-full py-2 rounded text-xs font-semibold"
+                    style={{ border: "1px solid #1B7A2B", background: "#1B7A2B", color: "#fff" }}>
+                    ▶ 이 FEMM 결과로 보정 적용 (λ·토크·EMF·T-N·효율맵 전부 FEMM 기반)
+                  </button>
+                )}
+                <div className="text-xs mt-1" style={{ color: "#8893A0" }}>
+                  보정하면 Output Data·Graphs·Thermal 이 FEMM λ 기반으로 재계산됩니다 (효율맵은 빠른 엔진이 FEMM λ로 생성 — 점마다 FEMM 실행 X). 형상·권선·재질 변경 시 자동 해제.
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1973,7 +2022,8 @@ function GraphsTab({ res, calc, solved }) {
       return pts;
     });
     // ── Torque–Speed (T-N) 용량곡선: 전류원(I_max) + 전압타원(V_max) 제약 하 최대토크 ──
-    const pp = Math.max(1, Math.round(res.Ke / res.lambda));
+    // pp 는 compute()에서 직접 받는다 (Ke/lambda 재추정은 lambda≈0서 0/0=NaN 전파).
+    const pp = res.pp || Math.max(1, res.lambda ? Math.round(res.Ke / res.lambda) : 1);
     const lamF = res.lambda, Rf = res.Rphase;
     const LdF = res.Ld * 1e-3, LqF = res.Lq * 1e-3;          // mH → H
     const Vmax = (res.noLoadSpeed * 2 * Math.PI * res.Ke) / 60; // 가용 상전압(피크) = Vdc 기반
