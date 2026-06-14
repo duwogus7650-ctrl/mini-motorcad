@@ -947,9 +947,9 @@ function GeometryTab({ geo, sG, res }) {
     if (!V.init) { V.ox = Wd / 2; V.oy = H / 2; V.scale = Math.min(Wd, H) / 130; V.init = true; }
     const ctx = cv.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, Wd, H);
+    ctx.fillStyle = "#0a1120"; ctx.fillRect(0, 0, Wd, H);
     // 그리드
-    ctx.strokeStyle = "#EEF1F4"; ctx.lineWidth = 1;
+    ctx.strokeStyle = "#15203a"; ctx.lineWidth = 1;
     const wx0 = s2w(0, 0, V)[0], wx1 = s2w(Wd, 0, V)[0];
     const wy1 = s2w(0, 0, V)[1], wy0 = s2w(0, H, V)[1];
     for (let gx = Math.ceil(wx0 / 10) * 10; gx <= wx1; gx += 10) {
@@ -958,7 +958,7 @@ function GeometryTab({ geo, sG, res }) {
     for (let gy = Math.ceil(wy0 / 10) * 10; gy <= wy1; gy += 10) {
       const [, sy] = w2s(0, gy, V); ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(Wd, sy); ctx.stroke();
     }
-    ctx.strokeStyle = "#E6EAEF";
+    ctx.strokeStyle = "#27374f";
     const [ox0, oy0] = w2s(0, 0, V);
     ctx.beginPath(); ctx.moveTo(ox0, 0); ctx.lineTo(ox0, H); ctx.moveTo(0, oy0); ctx.lineTo(Wd, oy0); ctx.stroke();
 
@@ -1269,7 +1269,7 @@ function SlotViewer({ geo, wind, res }) {
     cv.width = W * dpr; cv.height = H * dpr;
     const ctx = cv.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#0a1120"; ctx.fillRect(0, 0, W, H);
 
     const P = geo;
     const Rb = P.statorBore / 2, Rd = Rb + P.slotDepth, RoL = P.statorLamDia / 2;
@@ -1336,7 +1336,7 @@ function SlotViewer({ geo, wind, res }) {
     };
     pack.left.forEach(drawC); pack.right.forEach(drawC);
     // 외곽선
-    ctx.strokeStyle = "#7A1212"; ctx.lineWidth = 1;
+    ctx.strokeStyle = "#c25555"; ctx.lineWidth = 1;
     poly(slot); ctx.stroke();
   }, [geo, wind, pack]);
 
@@ -2573,11 +2573,11 @@ function WindingLayout({ geo, res }) {
       <div className="flex-1 flex items-center justify-center min-h-0 overflow-auto" style={{ background: "#101a30" }}>
         <svg width={size} height={size}>
           <circle cx={C} cy={C} r={RoL * sc} fill="#FBE9E9" stroke="#B02020" strokeWidth="1.2" />
-          <circle cx={C} cy={C} r={Rb * sc} fill="#fff" stroke="#B02020" strokeWidth="0.8" />
+          <circle cx={C} cy={C} r={Rb * sc} fill="#0a1120" stroke="#B02020" strokeWidth="0.8" />
           {slotPaths.map((d, i) => <path key={"s" + i} d={d} fill="#FAF3C8" stroke="#998800" strokeWidth="0.5" />)}
           <circle cx={C} cy={C} r={Rro * sc} fill="#CFF3F3" stroke="#0E8C8C" strokeWidth="0.8" />
           {magPaths.map((d, i) => <path key={"m" + i} d={d} fill="#CDE8CD" stroke="#1E7A1E" strokeWidth="0.4" />)}
-          <circle cx={C} cy={C} r={Rsh * sc} fill="#fff" stroke="#0E8C8C" strokeWidth="0.8" />
+          <circle cx={C} cy={C} r={Rsh * sc} fill="#1a2740" stroke="#0E8C8C" strokeWidth="0.8" />
           {arcs}
           {marks}
           {terms}
