@@ -740,7 +740,7 @@ export default function MiniMotorCad() {
         {tab === "geometry" && <GeometryTab geo={geo} sG={sG} res={res} />}
         {tab === "winding" && <WindingTab geo={geo} wind={wind} sW={sW} res={res} showRef={showRef} />}
         {tab === "materials" && <MaterialsTab mat={mat} sM={sM} res={res} showRef={showRef} />}
-        {tab === "calculation" && <CalculationTab calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} />}
+        {tab === "calculation" && <CalculationTab geo={geo} calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} />}
         {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} solved={solved} />}
         {tab === "graphs" && <GraphsTab res={res} calc={calc} solved={solved} />}
         {tab === "thermal" && <ThermalTab geo={geo} wind={wind} calc={calc} res={res} therm={therm} sT={sT} solved={solved} />}
@@ -1421,13 +1421,36 @@ function MaterialsTab({ mat, sM, res, showRef }) {
 }
 
 // ─── Calculation 탭 (Motor-CAD Drive 패널) ──────────────────────
-function CalculationTab({ calc, sC, wind, sW, res, solved, setSolved }) {
+function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved }) {
   const Box = ({ title, children }) => (
     <fieldset className="rounded px-2 pb-1.5 pt-0.5 mb-2" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
       <legend className="text-xs px-1 font-semibold" style={{ color: "#2A3540" }}>{title}</legend>
       {children}
     </fieldset>
   );
+  const [femmRes, setFemmRes] = useState(null);
+  const [femmBusy, setFemmBusy] = useState(false);
+  const [femmErr, setFemmErr] = useState(null);
+  const runFemm = async () => {
+    if (!res) return;
+    setFemmBusy(true); setFemmErr(null); setFemmRes(null);
+    const Rb = geo.statorBore / 2, Rro = (geo.statorBore - 2 * geo.airgap) / 2;
+    const payload = {
+      Ns: geo.slotNumber, poles: geo.poleNumber, statorRot: geo.statorRot, rotorRot: geo.rotorRot,
+      depth: geo.stackLength, slotDepth: geo.slotDepth,
+      Rlam: geo.statorLamDia / 2, Rb, Rro, Rmi: Rro - geo.magnetThickness, Rsh: geo.shaftDia / 2,
+      slotPoly: buildSlotPath(geo), magnetPoly: buildMagnetPath(geo), slotTurns: res.wa.table,
+      Ipk: res.IphRms * Math.SQRT2, Br: res.Br_used, slotArea: res.slotArea,
+    };
+    try {
+      const r = await fetch("http://localhost:8765/solve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const j = await r.json();
+      if (j.ok) setFemmRes(j); else setFemmErr(j.error || "FEMM 해석 실패");
+    } catch (e) {
+      setFemmErr("브릿지 서버 연결 실패 — fea/femm_server.py 가 실행 중인지 확인 (python fea/femm_server.py)");
+    }
+    setFemmBusy(false);
+  };
   const IlinePk = calc.IlineRms * Math.SQRT2;
   return (
     <div className="flex h-full overflow-auto gap-3 p-3 items-start">
@@ -1520,6 +1543,26 @@ function CalculationTab({ calc, sC, wind, sW, res, solved, setSolved }) {
           {solved ? "✓ 해석 완료 — Output Data / Graphs 확인" : "Solve E-Magnetic Model"}
         </button>
         <div className="text-xs mt-1.5" style={{ color: "#8893A0" }}>해석식(closed-form) 엔진 — Solve 시 즉시 계산됩니다. 입력을 바꾸면 다시 Solve 해야 합니다.</div>
+
+        <button onClick={runFemm} disabled={femmBusy}
+          className="w-full py-3 rounded font-semibold text-sm mt-3"
+          style={{ border: "1px solid #1B7A2B", background: femmBusy ? "#A8B2BC" : "#1B7A2B", color: "#fff", cursor: femmBusy ? "default" : "pointer" }}>
+          {femmBusy ? "⏳ FEMM 해석 중… (수십 초~분)" : "▶ FEMM 해석 (진짜 FEA)"}
+        </button>
+        <div className="text-xs mt-1.5" style={{ color: "#8893A0" }}>로컬 브릿지(python fea/femm_server.py) 필요. FEMM으로 다위치 FEA → 토크·코깅·자속밀도.</div>
+        {femmErr && <div className="text-xs mt-1 p-2 rounded" style={{ background: "#FBEAEA", color: "#B02020" }}>{femmErr}</div>}
+        {femmRes && (
+          <div className="rounded mt-2" style={{ border: "1px solid #1B7A2B", background: "#F0F7F1" }}>
+            <div className="px-2 py-1 text-xs font-bold" style={{ color: "#1B7A2B", borderBottom: "1px solid #BBD9C0" }}>FEMM 기반 성능 (FEA)</div>
+            <table className="w-full"><tbody>
+              <Row label="평균 토크 (FEA)" value={femmRes.avgTorque.toFixed(3)} unit="Nm" hl />
+              <Row label="토크 리플 (FEA)" value={femmRes.torqueRipple.toFixed(2)} unit="%" />
+              <Row label="코깅 토크 p-p (FEA)" value={femmRes.coggingPP.toFixed(1)} unit="mNm" />
+              <Row label="에어갭 자속밀도 (FEA)" value={femmRes.Bg.toFixed(3)} unit="T" />
+              <Row label="해석식 토크 (비교)" value={res.torque.toFixed(3)} unit="Nm" />
+            </tbody></table>
+          </div>
+        )}
       </div>
     </div>
   );
