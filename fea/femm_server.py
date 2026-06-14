@@ -341,20 +341,24 @@ def solve():
             we = pp * speed * 2 * math.pi / 60.0
             BEMFpk = we * lam_pk                                   # V (피크 상 역기전력)
 
-            # 1b) 인덕턴스 Ld/Lq (정렬 위치 고정, dq 전류 주입 → 쇄교자속 변화). 정격전류 기준 apparent.
+            # 1b) 인덕턴스 Ld/Lq (정렬 위치 고정, dq 전류 주입 → 쇄교자속 변화).
+            # Ld: ±0.5Ipk d축 대칭 섭동(±에서 탈/과포화가 상쇄 → 소신호 Ld). 단측이면 자석탈포화로 과대.
+            # Lq: +Ipk (자석 비대칭 없어 정격 apparent 로 충분).
             Ld = Lq = 0.0
             if Ipk > 1e-6:
-                ia, ib, ic = dq_currents(psi, -Ipk, 0.0)          # 약계자(−d) 방향 d축 전류
-                set_currents(d, ia, ib, ic)
-                femm.mi_analyze(0); femm.mi_loadsolution()
-                ldD, _ = dq_flux(d, sROT, psi, depth_m)
-                Ld = abs(ld0 - ldD) / P / Ipk * 1e3               # mH
-                ia, ib, ic = dq_currents(psi, 0.0, Ipk)           # q축 전류
-                set_currents(d, ia, ib, ic)
-                femm.mi_analyze(0); femm.mi_loadsolution()
+                dId = 0.5 * Ipk
+                ia, ib, ic = dq_currents(psi, dId, 0.0)
+                set_currents(d, ia, ib, ic); femm.mi_analyze(0); femm.mi_loadsolution()
+                ldP, _ = dq_flux(d, sROT, psi, depth_m)
+                ia, ib, ic = dq_currents(psi, -dId, 0.0)
+                set_currents(d, ia, ib, ic); femm.mi_analyze(0); femm.mi_loadsolution()
+                ldM, _ = dq_flux(d, sROT, psi, depth_m)
+                Ld = abs(ldP - ldM) / P / (2 * dId) * 1e3          # mH (대칭 시컨트=소신호)
+                ia, ib, ic = dq_currents(psi, 0.0, Ipk)
+                set_currents(d, ia, ib, ic); femm.mi_analyze(0); femm.mi_loadsolution()
                 _, lqQ = dq_flux(d, sROT, psi, depth_m)
-                Lq = abs(lqQ - lq0) / P / Ipk * 1e3               # mH
-                print('[solve] 인덕턴스 Ld %.4f mH, Lq %.4f mH (정격전류 apparent)' % (Ld, Lq), flush=True)
+                Lq = abs(lqQ - lq0) / P / Ipk * 1e3                # mH
+                print('[solve] 인덕턴스 Ld %.4f mH, Lq %.4f mH (Ld:대칭소신호 / Lq:정격)' % (Ld, Lq), flush=True)
             set_currents(d, 0, 0, 0)
 
             # 2) 부하 토크 (cogPeriod 1주기, 부하각 고정 동기전류) → 평균·리플 + 철심 자속밀도
