@@ -71,7 +71,7 @@ def build(d):
     murMag = 1.05
     Hc = d['Br'] / (MU0 * murMag)
 
-    femm.openfemm(1)
+    femm.openfemm(0)            # 0 = 창 보임(진단용)
     femm.newdocument(0)
     femm.mi_probdef(0, 'millimeters', 'planar', 1e-8, d['depth'], 30)
     femm.mi_getmaterial('Air')
@@ -245,12 +245,9 @@ def solve():
         return jsonify(ok=True, avgTorque=avgT, torqueRipple=ripT,
                        coggingPP=cogPP, Bg=Bg, loadT=loadT, cogT=cogT)
     except Exception as e:
-        print('[solve] 실패 ↓↓↓', flush=True)
+        print('[solve] 실패 ↓↓↓ (FEMM 창은 열어둠 — 화면에서 빈 영역 확인)', flush=True)
         print(traceback.format_exc(), flush=True)
-        try:
-            femm.closefemm()
-        except Exception:
-            pass
+        # 진단을 위해 FEMM 창을 닫지 않음
         return jsonify(ok=False, error=str(e), trace=traceback.format_exc())
     finally:
         pythoncom.CoUninitialize()
