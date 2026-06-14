@@ -30,6 +30,8 @@ def rot(pts, a):
 
 def seg(pr):
     n = len(pr)
+    for x, y in pr:                       # 끝점 노드 먼저 생성 (자동생성 안 됨)
+        femm.mi_addnode(x, y)
     for k in range(n):
         a, b = pr[k], pr[(k + 1) % n]
         femm.mi_addsegment(a[0], a[1], b[0], b[1])
@@ -92,6 +94,7 @@ def build(d):
     for i in range(Ns):
         up = rotpt(A1, sROT + i * 2 * math.pi / Ns)
         lo = rotpt(A1m, sROT + (i + 1) * 2 * math.pi / Ns)
+        femm.mi_addnode(up[0], up[1]); femm.mi_addnode(lo[0], lo[1])
         femm.mi_addarc(up[0], up[1], lo[0], lo[1], slotPitch - 2 * deltaDeg, 2.5)
 
     # 자석 폴리곤 + 폴갭 아크(Rmi) — 로터 완전원 생략
@@ -103,6 +106,7 @@ def build(d):
     for k in range(poles):
         hi = rotpt(mHi, rROT + k * 2 * math.pi / poles)
         lo = rotpt(mLo, rROT + (k + 1) * 2 * math.pi / poles)
+        femm.mi_addnode(hi[0], hi[1]); femm.mi_addnode(lo[0], lo[1])
         femm.mi_addarc(hi[0], hi[1], lo[0], lo[1], polePitch - 2 * magHalfDeg, 2.5)
 
     # 블록 라벨 — 모든 라벨을 축선(x/y축)에서 살짝 비켜 찍는다(OFF). 축 위면 영역 인식 실패.
