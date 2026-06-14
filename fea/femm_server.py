@@ -80,9 +80,8 @@ def build(d):
     for i in range(Ns):
         femm.mi_addmaterial('Coil%d' % i, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)
 
-    # 간섭 없는 완전 원: 스테이터 OD, 샤프트
+    # 스테이터 OD (샤프트 원은 생략 — 로터 중심부를 한 영역으로)
     arc(Rlam)
-    arc(Rsh)
 
     # 슬롯 폴리곤 + 치 페이스 아크(보어 Rb) — 보어 완전원 생략
     for i in range(Ns):
@@ -116,9 +115,8 @@ def build(d):
     for j in range(nAir):
         aG = 2 * math.pi * (j + 0.5) / nAir
         label(rG * math.cos(aG), rG * math.sin(aG), 'Air', 0, 0)
-    rR = (Rsh + Rmi) / 2
-    label(rR * math.cos(rROT + OFF), rR * math.sin(rROT + OFF), 'M-19 Steel', 0, 1)   # 로터 철심
-    label(Rsh / 2 * math.cos(OFF), Rsh / 2 * math.sin(OFF), 'Air', 0, 1)              # 샤프트(비자성)
+    rR = Rmi * 0.5
+    label(rR * math.cos(rROT + OFF), rR * math.sin(rROT + OFF), 'M-19 Steel', 0, 1)   # 로터 중심부(샤프트+철심)
     for i in range(Ns):
         a = sROT + i * 2 * math.pi / Ns + OFF
         rr = Rb + 0.45 * slotDepth
