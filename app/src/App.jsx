@@ -2613,7 +2613,7 @@ function WindingLayout({ geo, res }) {
   const size = 540, C = size / 2, margin = 14;
   const worldR = RoL * 1.45;
   const sc = (C - margin) / worldR;
-  const cols = ["#d63030", "#2a5fd0", "#1f9d4d"];   // U=빨강 / V=파랑 / W=초록 (레퍼런스 배색)
+  const cols = ["#CC2222", "#1B7A2B", "#2244CC"];
   const ang = (k) => (k * 2 * Math.PI) / Ns;          // 슬롯 k 중심각
   const SC = ([x, y]) => [C + x * sc, C - y * sc];    // mm → 화면
   const PR = (R, a) => [C + R * sc * Math.cos(a), C - R * sc * Math.sin(a)];
@@ -2623,44 +2623,31 @@ function WindingLayout({ geo, res }) {
   const slotPaths = Array.from({ length: Ns }, (_, k) => pathD(rotPts(buildSlotPath(geo), geo.statorRot * D2R + ang(k))));
   const magPaths = poles > 0 ? Array.from({ length: poles }, (_, k) => pathD(rotPts(buildMagnetPath(geo), geo.rotorRot * D2R + (k * 2 * Math.PI) / poles))) : [];
 
-  // 코일 사이드 마커(슬롯 내 2층 좌·우 나란히) + 엔드턴 아크
-  const Rmid = Rb + geo.slotDepth * 0.52;             // 마커 반경(슬롯 중간)
-  const dA = (2 * Math.PI / Ns) * 0.2;               // 슬롯 내 2층 좌/우 각도 오프셋
-  const visC = wa.coils.filter((c) => ph < 0 || c.phase === ph);
-  // 전류방향 기호: into(⊗, 들어감) / out(⊙, 나옴). 작은 박스 안에 표기.
+  // 코일별 마커 + 엔드턴 아크
+  const Rgo = Rb + geo.slotDepth * 0.66, Rret = Rb + geo.slotDepth * 0.34;
+  const coils = wa.coils.filter((c) => ph < 0 || c.phase === ph);
   const marker = (R, a, into, color, key) => {
     const [x, y] = PR(R, a);
-    return <g key={key}>
-      <circle cx={x} cy={y} r="6" fill="#fffdf0" stroke={color} strokeWidth="1.4" />
-      {into
-        ? <g><line x1={x - 3.2} y1={y - 3.2} x2={x + 3.2} y2={y + 3.2} stroke={color} strokeWidth="1.4" />
-            <line x1={x - 3.2} y1={y + 3.2} x2={x + 3.2} y2={y - 3.2} stroke={color} strokeWidth="1.4" /></g>
-        : <circle cx={x} cy={y} r="2" fill={color} />}
-    </g>;
+    return into
+      ? <g key={key}><circle cx={x} cy={y} r="6.5" fill="#fff" stroke={color} strokeWidth="1.4" />
+          <line x1={x - 3.2} y1={y - 3.2} x2={x + 3.2} y2={y + 3.2} stroke={color} strokeWidth="1.4" />
+          <line x1={x - 3.2} y1={y + 3.2} x2={x + 3.2} y2={y - 3.2} stroke={color} strokeWidth="1.4" /></g>
+      : <g key={key}><circle cx={x} cy={y} r="6.5" fill="#fff" stroke={color} strokeWidth="1.4" />
+          <circle cx={x} cy={y} r="2.2" fill={color} /></g>;
   };
-  // 엔드턴 아크 (코일 go↔ret, 라미 바깥 볼록 베지어)
-  const arcs = visC.map((c, idx) => {
+  const arcs = [], marks = [];
+  coils.forEach((c, idx) => {
+    const col = cols[c.phase];
     const ag = ang(c.go), ar = ang(c.ret);
-    const [gx, gy] = PR(RoL * 1.05, ag), [rx, ry] = PR(RoL * 1.05, ar);
+    // 엔드턴: 라미 바깥으로 볼록한 베지어
+    const [gx, gy] = PR(RoL * 1.04, ag), [rx, ry] = PR(RoL * 1.04, ar);
     let am = (ag + ar) / 2;
     if (Math.abs(ar - ag) > Math.PI) am += Math.PI;   // 0/2π 경계 보정
-    const [cx, cy] = PR(RoL * 1.26, am);
-    return <path key={"a" + idx} d={`M${gx.toFixed(1)},${gy.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${rx.toFixed(1)},${ry.toFixed(1)}`}
-      fill="none" stroke={cols[c.phase]} strokeWidth="1.5" opacity="0.85" />;
-  });
-  // 슬롯별 코일 사이드 수집 (go=+들어감 / ret=−나옴) → 슬롯 안 좌·우로 배치
-  const slotSides = Array.from({ length: Ns }, () => []);
-  visC.forEach((c) => {
-    slotSides[c.go].push({ phase: c.phase, dir: c.sign });
-    slotSides[c.ret].push({ phase: c.phase, dir: -c.sign });
-  });
-  const marks = [];
-  slotSides.forEach((sides, k) => {
-    const n = sides.length;
-    sides.forEach((s, j) => {
-      const aoff = n <= 1 ? 0 : (0.5 - (j / (n - 1))) * 2 * dA;   // 2층 좌·우 위치 스왑
-      marks.push(marker(Rmid, ang(k) + aoff, s.dir > 0, cols[s.phase], `m${k}_${j}`));
-    });
+    const [cx, cy] = PR(RoL * 1.22, am);
+    arcs.push(<path key={"a" + idx} d={`M${gx.toFixed(1)},${gy.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${rx.toFixed(1)},${ry.toFixed(1)}`}
+      fill="none" stroke={col} strokeWidth="1.3" opacity="0.85" />);
+    marks.push(marker(Rgo, ag, c.sign > 0, col, "g" + idx));
+    marks.push(marker(Rret, ar, c.sign < 0, col, "r" + idx));
   });
 
   // 상별 IN/OUT 단자 표기 (직렬 연결선은 제거 — 원래 배치도로 원복)
