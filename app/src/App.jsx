@@ -401,7 +401,10 @@ function compute(G, W, M, C, cal) {
   out.IphRms = Iph; out.IlineRms = C.IlineRms;
   const IphPk = Iph * Math.SQRT2;
   const Iq = IphPk * Math.cos(C.phaseAdv * D2R);
-  out.torque = 1.5 * pp * lam * Iq;
+  // kT: FEMM 직접토크/λ공식토크 비율 = 부하 포화 보정. 보정 미적용이면 1.
+  const kT = (cal && Number.isFinite(cal.kT)) ? cal.kT : 1;
+  out.kTsat = kT;
+  out.torque = 1.5 * pp * lam * Iq * kT;
   out.Kt_phase = Iph > 0 ? out.torque / Iph : 0;
   out.KtLine = C.IlineRms > 0 ? out.torque / (C.IlineRms * Math.SQRT2) : 0;
 
@@ -1596,17 +1599,22 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
                 {femmCal ? (
                   <button onClick={() => setFemmCal(null)} className="w-full py-2 rounded text-xs font-semibold"
                     style={{ border: "1px solid #B26A00", background: "#FFF3E0", color: "#B26A00" }}>
-                    ✓ FEMM 보정 적용중 (λ={femmCal.lam.toFixed(4)}) — 클릭하면 해제
+                    ✓ FEMM 보정 적용중 (λ={femmCal.lam.toFixed(4)}, kT={femmCal.kT ? femmCal.kT.toFixed(3) : "—"}) — 클릭하면 해제
                   </button>
                 ) : (
-                  <button onClick={() => setFemmCal({ lam: femmRes.Ke / res.pp, ke: femmRes.Ke, source: "FEMM" })}
+                  <button onClick={() => {
+                    const lamF = femmRes.Ke / res.pp;
+                    const Tlam = 1.5 * res.pp * lamF * (res.IphRms * Math.SQRT2) * Math.cos(calc.phaseAdv * D2R);
+                    const kT = (Math.abs(Tlam) > 1e-3 && Number.isFinite(femmRes.avgTorque)) ? femmRes.avgTorque / Tlam : 1;
+                    setFemmCal({ lam: lamF, ke: femmRes.Ke, kT, torqueFea: femmRes.avgTorque, source: "FEMM" });
+                  }}
                     className="w-full py-2 rounded text-xs font-semibold"
                     style={{ border: "1px solid #1B7A2B", background: "#1B7A2B", color: "#fff" }}>
-                    ▶ 이 FEMM 결과로 보정 적용 (λ·토크·EMF·T-N·효율맵 전부 FEMM 기반)
+                    ▶ 이 FEMM 결과로 보정 적용 (λ·토크(포화)·EMF·T-N·효율맵 전부 FEMM 기반)
                   </button>
                 )}
                 <div className="text-xs mt-1" style={{ color: "#8893A0" }}>
-                  보정하면 Output Data·Graphs·Thermal 이 FEMM λ 기반으로 재계산됩니다 (효율맵은 빠른 엔진이 FEMM λ로 생성 — 점마다 FEMM 실행 X). 형상·권선·재질 변경 시 자동 해제.
+                  보정하면 Output Data·Graphs·Thermal 이 FEMM λ·포화토크(kT) 기반으로 재계산됩니다 (효율맵은 빠른 엔진이 FEMM값으로 생성 — 점마다 FEMM 실행 X). 형상·권선·재질 변경 시 자동 해제.
                 </div>
               </div>
             )}
@@ -2025,6 +2033,7 @@ function GraphsTab({ res, calc, solved }) {
     // pp 는 compute()에서 직접 받는다 (Ke/lambda 재추정은 lambda≈0서 0/0=NaN 전파).
     const pp = res.pp || Math.max(1, res.lambda ? Math.round(res.Ke / res.lambda) : 1);
     const lamF = res.lambda, Rf = res.Rphase;
+    const kT = res.kTsat || 1;                                // FEMM 포화토크 보정(미보정=1)
     const LdF = res.Ld * 1e-3, LqF = res.Lq * 1e-3;          // mH → H
     const Vmax = (res.noLoadSpeed * 2 * Math.PI * res.Ke) / 60; // 가용 상전압(피크) = Vdc 기반
     const Imax = res.IphRms * Math.SQRT2;                       // 동작 상전류(피크) = 전류원 한계
@@ -2044,7 +2053,7 @@ function GraphsTab({ res, calc, solved }) {
         let iqVolt = Infinity;
         if (a > 1e-12) { const disc = b * b - 4 * a * c; iqVolt = disc < 0 ? 0 : Math.max(0, (-b + Math.sqrt(disc)) / (2 * a)); }
         const iq = Math.max(0, Math.min(iqCur, iqVolt));
-        const T = 1.5 * pp * (lamF * iq + (LdF - LqF) * id * iq);
+        const T = 1.5 * pp * (lamF * iq + (LdF - LqF) * id * iq) * kT;
         if (T > best) best = T;
       }
       return best;
@@ -2075,7 +2084,7 @@ function GraphsTab({ res, calc, solved }) {
         const id = -ImaxMap * (k / 80);
         const denom = lamF + (LdF - LqF) * id;
         if (Math.abs(denom) < 1e-9) continue;
-        const iq = Tt / (1.5 * pp * denom);
+        const iq = Tt / (1.5 * pp * denom * kT);                        // kT: 같은 토크에 더 큰 전류(포화)
         if (iq < 0 || id * id + iq * iq > ImaxMap * ImaxMap) continue;  // 전류 한계(피크)
         const Vd = Rf * id - we * LqF * iq, Vq = Rf * iq + we * (LdF * id + lamF);
         if (Vd * Vd + Vq * Vq > Vmax * Vmax) continue;                  // 전압 한계
