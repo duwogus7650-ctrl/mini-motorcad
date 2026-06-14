@@ -133,6 +133,7 @@ def build(d):
     femm.mi_setgroup(1)
     femm.mi_clearselected()
     femm.mi_makeABC(7, Rlam * 1.25, 0, 0, 0)
+    label(Rlam * 1.12, 0.001, 'Air', 0, 0)         # 외부 공기 (모델 OD ~ ABC 경계)
     femm.mi_zoomnatural()
     femm.mi_saveas('mini_motorcad.fem')
 
