@@ -11,6 +11,7 @@ Mini Motor-CAD ↔ FEMM 브릿지 서버
 """
 import math
 import traceback
+import pythoncom            # COM 초기화 (Flask 워커 스레드용)
 import femm
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -136,6 +137,7 @@ def airgap_bn(d, npts=180):
 def solve():
     d = request.get_json(force=True)
     print('\n[solve] 요청 수신 — Ns=%s poles=%s  FEMM 구동 시도...' % (d.get('Ns'), d.get('poles')), flush=True)
+    pythoncom.CoInitialize()        # 이 워커 스레드에서 COM 사용 준비 (FEMM ActiveX)
     try:
         pp = d['poles'] / 2
         Ipk = d['Ipk']
@@ -209,6 +211,8 @@ def solve():
         except Exception:
             pass
         return jsonify(ok=False, error=str(e), trace=traceback.format_exc())
+    finally:
+        pythoncom.CoUninitialize()
 
 
 @app.route('/ping')
