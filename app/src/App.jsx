@@ -1701,7 +1701,14 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
           style={{ border: "1px solid #1B7A2B", background: femmBusy ? "#A8B2BC" : "#1B7A2B", color: "#fff", cursor: femmBusy ? "default" : "pointer" }}>
           {femmBusy ? "⏳ FEMM 해석 중… (수십 초~분)" : "▶ FEMM 해석 (진짜 FEA)"}
         </button>
-        <div className="text-xs mt-1.5" style={{ color: "#7e8eac" }}>로컬 브릿지(python fea/femm_server.py) 필요. FEMM으로 다위치 FEA → 토크·코깅·자속밀도.</div>
+        <div className="rounded mt-1.5 p-2 text-xs" style={{ background: "#0a1120", border: "1px solid #22304d", color: "#7e8eac", lineHeight: 1.6 }}>
+          <div style={{ color: "#34d3e8", fontWeight: 600, marginBottom: 3 }}>▶ FEMM 해석 전, 브릿지 서버를 먼저 켜세요</div>
+          <div>1. 터미널(명령 프롬프트)에서 프로젝트 폴더로 이동:</div>
+          <div style={{ fontFamily: "JetBrains Mono,Consolas,monospace", color: "#cfe0ff", background: "#0c1424", padding: "2px 6px", borderRadius: 4, margin: "2px 0" }}>cd C:\\Users\\user\\Desktop\\mini-motorcad-main</div>
+          <div>2. 브릿지 서버 실행 (FEMM·pyfemm 설치 필요):</div>
+          <div style={{ fontFamily: "JetBrains Mono,Consolas,monospace", color: "#cfe0ff", background: "#0c1424", padding: "2px 6px", borderRadius: 4, margin: "2px 0" }}>python fea\\femm_server.py</div>
+          <div>3. <span style={{ color: "#2bd47a" }}>http://localhost:8765 대기</span> 뜨면 위 버튼 클릭. 코드 수정 시 서버 <b style={{ color: "#f5a524" }}>재시작(Ctrl+C → 재실행)</b>.</div>
+        </div>
         {femmErr && <div className="text-xs mt-1 p-2 rounded" style={{ background: "rgba(255,93,108,0.12)", color: "#ff8a94", border: "1px solid rgba(255,93,108,0.4)" }}>{femmErr}</div>}
         {femmRes && (
           <div className="rounded mt-2" style={{ border: "1px solid #1B7A2B", background: "#0c1424" }}>
