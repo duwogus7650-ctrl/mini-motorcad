@@ -5,8 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mini Motor-CAD — PMSM 기초설계</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      html, body { margin: 0; background: #070b14; }
+      /* 다크 테마 스크롤바 */
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-track { background: #0b1322; }
+      ::-webkit-scrollbar-thumb { background: #25324d; border-radius: 5px; border: 2px solid #0b1322; }
+      ::-webkit-scrollbar-thumb:hover { background: #34466b; }
+      /* number 입력 스피너 톤다운 */
+      input[type=number]::-webkit-inner-spin-button { opacity: 0.4; }
+    </style>
   </head>
-  <body style="margin:0">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

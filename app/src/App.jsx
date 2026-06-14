@@ -9,6 +9,44 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 const D2R = Math.PI / 180;
 const MU0 = 4 * Math.PI * 1e-7;
 
+// ─── 다크 "컨트롤 패널" 테마 토큰 ────────────────────────────────
+const UI = {
+  bg: "linear-gradient(160deg,#0b1322 0%,#080d18 60%,#070a12 100%)",
+  panel: "#101a30",          // 카드 배경
+  panel2: "#0c1424",         // 더 깊은 패널(헤더/표 헤더)
+  inset: "#0a1120",          // 입력/오목 영역
+  border: "#22304d",         // 기본 테두리
+  borderHi: "#33b7d8",       // 강조(시안) 테두리
+  cyan: "#34d3e8",           // 주 강조(시안)
+  blue: "#3b82f6",           // 버튼/링크 블루
+  green: "#2bd47a",          // OK/성공
+  amber: "#f5a524",          // 경고/액션
+  red: "#ff5d6c",            // 위험/정지
+  head: "#e6edf7",           // 제목 텍스트
+  text: "#c4d0e4",           // 본문
+  label: "#7e8eac",          // 라벨(muted)
+  faint: "#56668a",          // 더 흐린
+  mono: "'JetBrains Mono','Consolas',monospace",
+  ui: "'Chakra Petch','Malgun Gothic','Noto Sans KR',sans-serif",
+  logo: "'Orbitron','Chakra Petch',sans-serif",
+};
+// 패널 카드 (브래킷 코너 장식 포함) — 다크 컨트롤패널 룩
+const Panel = ({ title, accent = UI.cyan, children, style, bodyClass = "" }) => (
+  <div style={{ position: "relative", background: UI.panel, border: `1px solid ${UI.border}`, borderRadius: 10, boxShadow: "0 2px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.03)", ...style }}>
+    {title && (
+      <div className="px-3 pt-2 pb-1.5 text-xs font-semibold" style={{ color: UI.label, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: UI.ui }}>
+        <span style={{ color: accent, marginRight: 6 }}>▮</span>{title}
+      </div>
+    )}
+    <div className={bodyClass} style={{ padding: title ? "0 10px 10px" : 10 }}>{children}</div>
+    {/* 브래킷 코너 */}
+    {[[0, 0], [1, 0], [0, 1], [1, 1]].map(([rx, ry], i) => (
+      <span key={i} style={{ position: "absolute", [rx ? "right" : "left"]: 6, [ry ? "bottom" : "top"]: 6, width: 9, height: 9,
+        [`border${ry ? "Bottom" : "Top"}`]: `1.5px solid ${accent}66`, [`border${rx ? "Right" : "Left"}`]: `1.5px solid ${accent}66`, pointerEvents: "none" }} />
+    ))}
+  </div>
+);
+
 // ─── DXF 파서 ────────────────────────────────────────────────────
 function parseDxf(text) {
   const lines = text.split(/\r\n|\r|\n/);
@@ -577,45 +615,50 @@ const REF = {
 
 // ════════════════════════════════════════════════════════════════
 const Row = ({ label, value, unit, refv, hl }) => (
-  <tr style={{ borderTop: "1px solid #E5E9ED", background: hl ? "#FCF6EE" : undefined }}>
-    <td className="px-2 py-1 text-xs" style={{ color: "#2A3540" }}>{label}</td>
-    <td className="px-2 py-1 text-xs text-right font-semibold" style={{ fontFamily: "Consolas,monospace" }}>{value}</td>
-    <td className="px-2 py-1 text-xs" style={{ color: "#8893A0" }}>{unit || ""}</td>
+  <tr style={{ borderTop: `1px solid ${UI.border}`, background: hl ? "rgba(52,211,232,0.07)" : undefined }}>
+    <td className="px-2 py-1 text-xs" style={{ color: UI.text }}>{label}</td>
+    <td className="px-2 py-1 text-xs text-right font-semibold" style={{ fontFamily: UI.mono, color: hl ? UI.cyan : UI.head }}>{value}</td>
+    <td className="px-2 py-1 text-xs" style={{ color: UI.faint }}>{unit || ""}</td>
     {refv !== undefined && (
-      <td className="px-2 py-1 text-xs text-right" style={{ color: "#1B7A2B", fontFamily: "Consolas,monospace" }}>{refv}</td>
+      <td className="px-2 py-1 text-xs text-right" style={{ color: UI.green, fontFamily: UI.mono }}>{refv}</td>
     )}
   </tr>
 );
 
 const NumIn = ({ label, value, onChange, step = 0.01, w = "w-20" }) => (
-  <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA" }}>
-    <span className="text-xs whitespace-nowrap" style={{ color: "#2A3540" }}>{label}</span>
+  <div className="flex items-center justify-between gap-1 px-2 py-1" style={{ borderTop: `1px solid ${UI.border}` }}>
+    <span className="text-xs whitespace-nowrap" style={{ color: UI.label }}>{label}</span>
     <input type="number" step={step} value={value}
       onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-      className={`${w} text-right text-xs px-1 py-0.5 rounded`}
-      style={{ border: "1px solid #C8CFD6", fontFamily: "Consolas,monospace" }} />
+      className={`${w} text-right text-xs px-1.5 py-0.5 rounded outline-none`}
+      style={{ border: `1px solid ${UI.border}`, background: UI.inset, color: UI.head, fontFamily: UI.mono }}
+      onFocus={(e) => (e.target.style.borderColor = UI.cyan)}
+      onBlur={(e) => (e.target.style.borderColor = UI.border)} />
   </div>
 );
-const Radio = ({ group, val, label, cur, onPick, disabled }) => (
-  <label className={"flex items-center gap-1.5 text-xs py-0.5 px-2 " + (disabled ? "opacity-40" : "cursor-pointer")}>
-    <input type="radio" name={group} checked={cur === val} disabled={disabled} onChange={() => onPick(val)} />{label}
-  </label>
-);
+const Radio = ({ group, val, label, cur, onPick, disabled }) => {
+  const on = cur === val;
+  return (
+    <label className={"flex items-center gap-2 text-xs py-1 px-2 rounded " + (disabled ? "opacity-40" : "cursor-pointer")}
+      onClick={() => !disabled && onPick(val)}
+      style={{ color: on ? UI.head : UI.label, background: on ? "rgba(52,211,232,0.08)" : "transparent" }}>
+      <span style={{ width: 11, height: 11, borderRadius: "50%", flexShrink: 0, border: `1.5px solid ${on ? UI.cyan : UI.faint}`, boxShadow: on ? `inset 0 0 0 2.5px ${UI.cyan}` : "none", background: UI.inset }} />
+      {label}
+    </label>
+  );
+};
 const SectionHead = ({ color, children }) => (
-  <div className="px-2 py-1 text-xs font-bold" style={{ background: "#E8EBEE", borderLeft: `3px solid ${color}` }}>{children}</div>
+  <div className="px-3 py-1.5 text-xs font-semibold" style={{ background: UI.panel2, borderLeft: `3px solid ${color}`, color: UI.head, letterSpacing: "0.06em", borderTopRightRadius: 6 }}>{children}</div>
 );
-// fieldset 박스 — 반드시 모듈 레벨에 둘 것. 컴포넌트 내부에 정의하면 매 렌더마다
-// 새 컴포넌트 타입이 되어 자식 input 이 리마운트→입력 포커스가 풀린다.
+// 입력 패널 박스 — 모듈 레벨 필수(내부 정의 시 매 렌더 새 타입→input 포커스 풀림). Panel 래퍼 사용.
 const Box = ({ title, children }) => (
-  <fieldset className="rounded px-2 pb-1.5 pt-0.5 mb-2" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
-    <legend className="text-xs px-1 font-semibold" style={{ color: "#2A3540" }}>{title}</legend>
-    {children}
-  </fieldset>
+  <div className="mb-2.5"><Panel title={title} bodyClass="-mx-1">{children}</Panel></div>
 );
 // 강판 선택 드롭다운 (Materials 탭). 동일 이유로 모듈 레벨.
 const SteelSel = ({ value, onPick }) => (
-  <select value={value} onChange={(e) => onPick(e.target.value)} className="text-xs px-1 py-0.5 rounded w-32" style={{ border: "1px solid #C8CFD6" }}>
-    {Object.keys(STEELS).map((k) => <option key={k}>{k}</option>)}
+  <select value={value} onChange={(e) => onPick(e.target.value)} className="text-xs px-1.5 py-1 rounded w-32 outline-none"
+    style={{ border: `1px solid ${UI.border}`, background: UI.inset, color: UI.head, fontFamily: UI.mono }}>
+    {Object.keys(STEELS).map((k) => <option key={k} style={{ background: UI.panel }}>{k}</option>)}
   </select>
 );
 
@@ -731,6 +774,73 @@ export default function MiniMotorCad() {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = "mini_motorcad_femm.lua"; a.click();
   };
+  // CSV 다운로드 (UTF-8 BOM — Excel에서 한글/°·² 깨짐 방지)
+  const downloadCsv = (name, text) => {
+    const blob = new Blob(["﻿" + text], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  };
+  const exportSpecCsv = () => {
+    if (!res) { alert("결과 없음 — 입력 확인"); return; }
+    const keRpm = calc.speed > 0 ? res.Erms / (calc.speed / 1000) : 0;   // Vrms/krpm (상)
+    const rows = [
+      ["Pole pairs", res.pp, ""],
+      ["Slots", geo.slotNumber, ""],
+      ["Rated voltage", calc.Vdc, "V"],
+      ["Rated current", res.IlineRms.toFixed(2), "Arms"],
+      ["Phase resistance", res.Rphase.toFixed(4), "Ohm"],
+      ["Phase inductance", ((res.Ld + res.Lq) / 2).toFixed(4), "mH"],
+      ["Torque constant Kt", res.Kt_phase.toFixed(4), "Nm/Arms"],
+      ["Back-EMF constant", keRpm.toFixed(3), "Vrms/krpm"],
+      ["Slot fill factor", (res.wireSlotFill * 100).toFixed(1), "%"],
+      ["Rated speed", calc.speed, "rpm"],
+      ["Rated torque", res.torque.toFixed(3), "Nm"],
+      ["Peak torque", (res.torque * 1.6).toFixed(3), "Nm"],
+      ["Max speed", Math.round(res.noLoadSpeed), "rpm"],
+      ["Output power", res.Pout.toFixed(1), "W"],
+      ["Efficiency", res.eff.toFixed(2), "%"],
+      ["Power factor", res.PF.toFixed(3), ""],
+      ["Outer diameter", geo.statorLamDia, "mm"],
+      ["Stack length", geo.stackLength, "mm"],
+      ["Weight", res.mActive.toFixed(3), "kg"],
+      ["Rotor inertia", (res.Jrotor * 1e4).toFixed(3), "kg·cm²"],
+      ["Shaft diameter", geo.shaftDia, "mm"],
+      ["Insulation class", "", ""],
+      ["Protection", "", ""],
+      ["Max winding temp", calc.Tcu, "°C"],
+      ["Ambient temperature", therm.ambient, "°C"],
+    ];
+    const csv = "parameter,value,unit\n" + rows.map((r) => r.join(",")).join("\n") + "\n";
+    downloadCsv("motor_spec.csv", csv);
+  };
+  const exportTNCsv = () => {
+    if (!res) { alert("결과 없음 — 입력 확인"); return; }
+    const pp = res.pp, lamF = res.lambda, Rf = res.Rphase;
+    const LdF = res.Ld * 1e-3, LqF = res.Lq * 1e-3, kT = res.kTsat || 1;
+    const Vmax = (res.noLoadSpeed * 2 * Math.PI * res.Ke) / 60;
+    const Imax = res.IphRms * Math.SQRT2;
+    const maxTorqueAt = (n, Im) => {            // GraphsTab 와 동일한 전류원+전압타원 제약 MTPA
+      const wm = (n * 2 * Math.PI) / 60, we = pp * wm;
+      let best = 0;
+      for (let k = 0; k < 121; k++) {
+        const id = -Im * (k / 120);
+        const iqCur = Math.sqrt(Math.max(Im * Im - id * id, 0));
+        const a = (we * LqF) ** 2 + Rf * Rf;
+        const b = 2 * Rf * we * ((LdF - LqF) * id + lamF);
+        const c = (Rf * id) ** 2 + (we * (LdF * id + lamF)) ** 2 - Vmax * Vmax;
+        let iqVolt = Infinity;
+        if (a > 1e-12) { const disc = b * b - 4 * a * c; iqVolt = disc < 0 ? 0 : Math.max(0, (-b + Math.sqrt(disc)) / (2 * a)); }
+        const iq = Math.max(0, Math.min(iqCur, iqVolt));
+        const T = 1.5 * pp * (lamF * iq + (LdF - LqF) * id * iq) * kT;
+        if (T > best) best = T;
+      }
+      return best;
+    };
+    const speeds = Array.from({ length: 10 }, (_, i) => i * 500);   // 0..4500
+    const lines = speeds.map((n) => [n, maxTorqueAt(n, Imax).toFixed(3), maxTorqueAt(n, Imax * 1.6).toFixed(3)].join(","));
+    const csv = "speed_rpm,cont_torque_Nm,peak_torque_Nm\n" + lines.join("\n") + "\n";
+    downloadCsv("tn_curve.csv", csv);
+  };
 
   const TABS = [
     ["geometry", "Geometry"], ["winding", "Winding"], ["materials", "Materials"],
@@ -738,37 +848,47 @@ export default function MiniMotorCad() {
   ];
 
   return (
-    <div className="h-screen flex flex-col" style={{ background: "#F0F2F4", fontFamily: "'Segoe UI','Noto Sans KR',sans-serif", color: "#1A222C" }}>
+    <div className="h-screen flex flex-col" style={{ background: UI.bg, fontFamily: UI.ui, color: UI.text }}>
       {/* 헤더 + 탭 */}
-      <div style={{ background: "#FFFFFF", borderBottom: "2px solid #1A222C" }}>
-        <div className="flex items-center gap-3 px-3 pt-2">
-          <span className="font-bold text-sm tracking-tight">Mini Motor-CAD</span>
-          {femmCal && <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "#1B7A2B", color: "#fff" }}>FEMM 보정됨 (λ={femmCal.lam.toFixed(4)})</span>}
-          {stale && <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "#7A1212", color: "#fff" }}>⚠ 입력값 비정상 — 마지막 유효 결과 표시 중</span>}
+      <div style={{ background: UI.panel2, borderBottom: `1px solid ${UI.border}`, boxShadow: "0 2px 12px rgba(0,0,0,0.4)" }}>
+        <div className="flex items-center gap-3 px-4 pt-2.5">
+          <span style={{ fontFamily: UI.logo, fontWeight: 700, fontSize: 16, letterSpacing: "0.04em", color: UI.head }}>
+            MINI <span style={{ color: UI.cyan }}>MOTOR-CAD</span>
+          </span>
+          <span className="text-xs" style={{ color: UI.faint, letterSpacing: "0.1em" }}>PMSM DESIGN</span>
+          {femmCal && <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "rgba(43,212,122,0.15)", color: UI.green, border: `1px solid ${UI.green}55` }}>● FEMM 보정됨 (λ={femmCal.lam.toFixed(4)})</span>}
+          {stale && <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "rgba(255,93,108,0.15)", color: UI.red, border: `1px solid ${UI.red}55` }}>⚠ 입력값 비정상 — 마지막 유효 결과</span>}
           <div className="flex-1" />
-          <label className="text-xs flex items-center gap-1">
-            <input type="checkbox" checked={showRef} onChange={(e) => setShowRef(e.target.checked)} />
+          <label className="text-xs flex items-center gap-1.5" style={{ color: UI.label }}>
+            <input type="checkbox" checked={showRef} onChange={(e) => setShowRef(e.target.checked)} accentColor={UI.cyan} />
             Motor-CAD 참조값 표시
           </label>
-          <button onClick={exportFemm} className="text-xs px-3 py-1 rounded font-medium mb-1" style={{ border: "1px solid #1B7A2B", color: "#1B7A2B", background: "#fff" }}>
-            FEMM 스크립트 (FEA)
-          </button>
-          <button onClick={exportAll} className="text-xs px-3 py-1 rounded text-white font-medium mb-1" style={{ background: "#B5622D" }}>
+          {[["사양표 CSV", exportSpecCsv], ["T-N CSV", exportTNCsv], ["FEMM 스크립트", exportFemm]].map(([t, fn]) => (
+            <button key={t} onClick={fn} className="text-xs px-3 py-1 rounded font-medium mb-1"
+              style={{ border: `1px solid ${UI.border}`, color: UI.cyan, background: UI.inset }}>{t}</button>
+          ))}
+          <button onClick={exportAll} className="text-xs px-3 py-1 rounded font-semibold mb-1"
+            style={{ background: `linear-gradient(180deg,${UI.blue},#2456c8)`, color: "#fff", border: "1px solid #2456c8" }}>
             설계 JSON 내보내기
           </button>
         </div>
-        <div className="flex gap-0.5 px-3">
-          {TABS.map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)}
-              className="text-xs px-3 py-1.5 rounded-t font-medium"
-              style={{
-                background: tab === k ? "#F0F2F4" : "#DDE2E7",
-                border: "1px solid #C8CFD6", borderBottom: tab === k ? "1px solid #F0F2F4" : "1px solid #C8CFD6",
-                marginBottom: -1, color: tab === k ? "#1A222C" : "#5C6B7A",
-              }}>
-              {l}
-            </button>
-          ))}
+        <div className="flex gap-1 px-4 pb-0">
+          {TABS.map(([k, l]) => {
+            const on = tab === k;
+            return (
+              <button key={k} onClick={() => setTab(k)}
+                className="text-xs px-3.5 py-2 font-semibold"
+                style={{
+                  background: on ? UI.panel : "transparent",
+                  border: `1px solid ${on ? UI.border : "transparent"}`, borderBottom: "none",
+                  borderTopLeftRadius: 8, borderTopRightRadius: 8, marginBottom: -1,
+                  color: on ? UI.cyan : UI.label, letterSpacing: "0.04em",
+                  boxShadow: on ? `inset 0 2px 0 ${UI.cyan}` : "none",
+                }}>
+                {l}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -825,7 +945,7 @@ function GeometryTab({ geo, sG, res }) {
     for (let gy = Math.ceil(wy0 / 10) * 10; gy <= wy1; gy += 10) {
       const [, sy] = w2s(0, gy, V); ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(Wd, sy); ctx.stroke();
     }
-    ctx.strokeStyle = "#D5DBE1";
+    ctx.strokeStyle = "#E6EAEF";
     const [ox0, oy0] = w2s(0, 0, V);
     ctx.beginPath(); ctx.moveTo(ox0, 0); ctx.lineTo(ox0, H); ctx.moveTo(0, oy0); ctx.lineTo(Wd, oy0); ctx.stroke();
 
@@ -987,16 +1107,16 @@ function GeometryTab({ geo, sG, res }) {
 
   return (
     <div className="flex h-full">
-      <div className="w-60 overflow-y-auto flex-shrink-0" style={{ background: "#FAFBFC", borderRight: "1px solid #D5DBE1" }}>
+      <div className="w-60 overflow-y-auto flex-shrink-0" style={{ background: "#0c1424", borderRight: "1px solid #22304d" }}>
         <div className="p-2 flex flex-col gap-1">
-          <button onClick={() => fileRef.current?.click()} className="text-xs px-2 py-1.5 rounded text-white font-medium" style={{ background: "#B5622D" }}>DXF 불러오기</button>
+          <button onClick={() => fileRef.current?.click()} className="text-xs px-2 py-1.5 rounded font-semibold" style={{ background: "linear-gradient(180deg,#f5a524,#d98a10)", color: "#15110a" }}>DXF 불러오기</button>
           <input ref={fileRef} type="file" accept=".dxf" className="hidden"
             onChange={(e) => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ""; }} />
           {dxfName && <div className="text-xs truncate" style={{ color: "#1B7A2B", fontFamily: "Consolas,monospace" }}>{dxfName}</div>}
           <div className="flex gap-1">
-            <button onClick={fitView} className="flex-1 text-xs px-2 py-1 rounded" style={{ border: "1px solid #1A222C", background: "#fff" }}>화면 맞춤</button>
+            <button onClick={fitView} className="flex-1 text-xs px-2 py-1 rounded" style={{ border: "1px solid #22304d", background: "#101a30", color: "#c4d0e4" }}>화면 맞춤</button>
             <button onClick={() => { setMeasure(!measure); setMPts([]); }} className="flex-1 text-xs px-2 py-1 rounded"
-              style={{ border: "1px solid #1A222C", background: measure ? "#1A222C" : "#fff", color: measure ? "#fff" : "#1A222C" }}>
+              style={{ border: `1px solid ${measure ? "#34d3e8" : "#22304d"}`, background: measure ? "rgba(52,211,232,0.15)" : "#101a30", color: measure ? "#34d3e8" : "#c4d0e4" }}>
               측정 {measure ? "ON" : "OFF"}
             </button>
           </div>
@@ -1006,19 +1126,19 @@ function GeometryTab({ geo, sG, res }) {
           </button>
           {dxf && (
             <button onClick={exportAlignedDxf} className="text-xs px-2 py-1 rounded font-medium"
-              style={{ border: "1px solid #1B7A2B", color: "#1B7A2B", background: "#fff", cursor: "pointer" }}>
+              style={{ border: "1px solid #1B7A2B", color: "#1B7A2B", background: "#101a30", cursor: "pointer" }}>
               ⬇ DXF 내보내기 (현재 정렬)
             </button>
           )}
           {autoInfo && (
-            <div className="text-xs rounded p-2 mt-0.5" style={{ background: "#F0F7F1", border: "1px solid #BBD9C0", fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
+            <div className="text-xs rounded p-2 mt-0.5" style={{ background: "#0c1424", border: "1px solid #22304d", fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
               <div className="font-bold mb-0.5" style={{ color: "#1B7A2B" }}>추출 결과 (단위 ×{autoInfo.unit})</div>
               <div>OD {autoInfo.statorLamDia} · 보어 {autoInfo.statorBore} · 샤프트 {autoInfo.shaftDia || "—"}</div>
               <div>슬롯 {autoInfo.slotCount || "?"} · 극 {autoInfo.poleCount || "?"}</div>
               <div style={{ color: "#B5622D" }}>에어갭(추정) {autoInfo.airgap || "?"} · 회전(추정) S{autoInfo.statorRot}°/R{autoInfo.rotorRot}° — 미적용, 직접 입력/정렬</div>
-              <div style={{ color: "#5C6B7A" }}>동심원 Ø: {autoInfo.dias.join(", ") || "없음"}</div>
-              <div style={{ color: "#5C6B7A" }}>폴리 외측 {autoInfo.outerN}→슬롯 {autoInfo.slotCount} · 내측 {autoInfo.innerN}→극 {autoInfo.poleCount} · 폴리보어 {autoInfo.borePoly || "—"}</div>
-              <div style={{ color: "#8893A0", marginTop: 2 }}>적용 {autoInfo.applied.length}개 — 오버레이 확인 후 미세조정</div>
+              <div style={{ color: "#7e8eac" }}>동심원 Ø: {autoInfo.dias.join(", ") || "없음"}</div>
+              <div style={{ color: "#7e8eac" }}>폴리 외측 {autoInfo.outerN}→슬롯 {autoInfo.slotCount} · 내측 {autoInfo.innerN}→극 {autoInfo.poleCount} · 폴리보어 {autoInfo.borePoly || "—"}</div>
+              <div style={{ color: "#7e8eac", marginTop: 2 }}>적용 {autoInfo.applied.length}개 — 오버레이 확인 후 미세조정</div>
             </div>
           )}
         </div>
@@ -1026,24 +1146,24 @@ function GeometryTab({ geo, sG, res }) {
         {SFIELDS.map(([k, l, s]) => <NumIn key={k} label={l} value={geo[k]} step={s} onChange={(v) => sG(k, v)} />)}
         <SectionHead color="#22BB22">Rotor Parameters</SectionHead>
         {RFIELDS.map(([k, l, s]) => <NumIn key={k} label={l} value={geo[k]} step={s} onChange={(v) => sG(k, v)} />)}
-        <div className="flex items-center justify-between px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA", background: "#F1F4F6" }}>
-          <span className="text-xs" style={{ color: "#5C6B7A" }}>Rotor Diameter [Calc]</span>
+        <div className="flex items-center justify-between px-2 py-0.5" style={{ borderTop: "1px solid #22304d", background: "#0c1424" }}>
+          <span className="text-xs" style={{ color: "#7e8eac" }}>Rotor Diameter [Calc]</span>
           <span className="text-xs font-semibold" style={{ fontFamily: "Consolas,monospace" }}>{rotorDia.toFixed(2)}</span>
         </div>
-        <SectionHead color="#5C6B7A">Axial Dimensions</SectionHead>
+        <SectionHead color="#7e8eac">Axial Dimensions</SectionHead>
         {AFIELDS.map(([k, l, s]) => <NumIn key={k} label={l} value={geo[k]} step={s} onChange={(v) => sG(k, v)} />)}
         <SectionHead color="#1B7A2B">DXF Transform</SectionHead>
         {[["scale", "Scale", 0.001], ["dx", "Offset X", 0.1], ["dy", "Offset Y", 0.1], ["rot", "Rotation [°]", 0.5]].map(([k, l, s]) => (
           <NumIn key={k} label={l} value={dxfT[k]} step={s} onChange={(v) => setDxfT((t) => ({ ...t, [k]: v }))} />
         ))}
-        <SectionHead color="#8893A0">Layers</SectionHead>
+        <SectionHead color="#7e8eac">Layers</SectionHead>
         {[["dxf", "DXF 단면"], ["stator", "Stator Lam"], ["slots", "Slots"], ["rotor", "Rotor / Shaft"], ["magnets", "Magnets"]].map(([k, l]) => (
-          <label key={k} className="flex items-center gap-2 px-2 py-0.5 text-xs cursor-pointer" style={{ borderTop: "1px solid #E2E6EA" }}>
+          <label key={k} className="flex items-center gap-2 px-2 py-0.5 text-xs cursor-pointer" style={{ borderTop: "1px solid #22304d" }}>
             <input type="checkbox" checked={layers[k]} onChange={(e) => setLayers((L) => ({ ...L, [k]: e.target.checked }))} />{l}
           </label>
         ))}
-        <div className="px-2 py-2" style={{ borderTop: "1px solid #E2E6EA" }}>
-          <div className="text-xs mb-1" style={{ color: "#5C6B7A" }}>템플릿 투명도</div>
+        <div className="px-2 py-2" style={{ borderTop: "1px solid #22304d" }}>
+          <div className="text-xs mb-1" style={{ color: "#7e8eac" }}>템플릿 투명도</div>
           <input type="range" min="0.05" max="1" step="0.05" value={opacity} onChange={(e) => setOpacity(parseFloat(e.target.value))} className="w-full" />
         </div>
       </div>
@@ -1054,7 +1174,7 @@ function GeometryTab({ geo, sG, res }) {
             onWheel={onWheel} onMouseDown={onDown} onMouseMove={onMove}
             onMouseUp={() => (dragRef.current = null)} onMouseLeave={() => (dragRef.current = null)} />
         </div>
-        <div className="flex items-center gap-4 px-3 py-1 text-xs" style={{ background: "#1A222C", color: "#C8CFD6", fontFamily: "Consolas,monospace" }}>
+        <div className="flex items-center gap-4 px-3 py-1 text-xs" style={{ background: "#0c1424", color: "#9fb2d4", fontFamily: "JetBrains Mono,Consolas,monospace", borderTop: "1px solid #22304d" }}>
           {cursor && <span>X {cursor[0].toFixed(2)} Y {cursor[1].toFixed(2)} R {Math.hypot(cursor[0], cursor[1]).toFixed(3)} (Ø{(2 * Math.hypot(cursor[0], cursor[1])).toFixed(2)})</span>}
           {mPts.length === 1 && <span style={{ color: "#F59E0B" }}>측정: 두 번째 점 클릭</span>}
           {mDist !== null && <span style={{ color: "#F59E0B" }}>거리 {mDist.toFixed(3)} | R1 {Math.hypot(mPts[0][0], mPts[0][1]).toFixed(3)} | R2 {Math.hypot(mPts[1][0], mPts[1][1]).toFixed(3)}</span>}
@@ -1217,7 +1337,7 @@ function SlotViewer({ geo, wind, res }) {
   const fit = pack.capacity >= pack.targetSide;
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <div ref={wrapRef} className="flex-1 relative min-h-0" style={{ background: "#fff" }}>
+      <div ref={wrapRef} className="flex-1 relative min-h-0" style={{ background: "#101a30" }}>
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       </div>
       <div className="flex items-center gap-4 px-3 py-1 text-xs"
@@ -1243,23 +1363,23 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
   return (
     <div className="flex h-full overflow-hidden">
       {/* 좌: 입력 */}
-      <div className="w-60 overflow-y-auto flex-shrink-0" style={{ background: "#FAFBFC", borderRight: "1px solid #D5DBE1" }}>
+      <div className="w-60 overflow-y-auto flex-shrink-0" style={{ background: "#0c1424", borderRight: "1px solid #22304d" }}>
         <SectionHead color="#B5622D">Winding Definition</SectionHead>
         <NumIn label="Turns (per coil)" value={wind.turnsPerCoil} step={1} onChange={(v) => sW("turnsPerCoil", v)} />
         <NumIn label="Throw (coil span)" value={wind.throw} step={1} onChange={(v) => sW("throw", v)} />
         <NumIn label="Parallel Paths" value={wind.parallelPaths} step={1} onChange={(v) => sW("parallelPaths", v)} />
-        <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA" }}>
+        <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #22304d" }}>
           <span className="text-xs">Connection</span>
           <select value={wind.connection} onChange={(e) => sW("connection", e.target.value)}
-            className="text-xs px-1 py-0.5 rounded" style={{ border: "1px solid #C8CFD6" }}>
+            className="text-xs px-1 py-0.5 rounded" style={{ border: "1px solid #22304d" }}>
             <option value="delta">Delta</option><option value="star">Star</option>
           </select>
         </div>
         <SectionHead color="#CC8800">Wire Selection</SectionHead>
-        <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA" }}>
+        <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #22304d" }}>
           <span className="text-xs">Wire Type</span>
           <select value={wireType} onChange={(e) => setWireType(e.target.value)}
-            className="text-xs px-1 py-0.5 rounded" style={{ border: "1px solid #C8CFD6" }}>
+            className="text-xs px-1 py-0.5 rounded" style={{ border: "1px solid #22304d" }}>
             <option value="direct">Diameter Input</option>
             <option value="Metric">Metric Table</option>
             <option value="AWG">AWG Table</option>
@@ -1267,14 +1387,14 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
           </select>
         </div>
         {wireType !== "direct" && (
-          <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA" }}>
+          <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #22304d" }}>
             <span className="text-xs">Gauge</span>
             <select value=""
               onChange={(e) => {
                 const w = WIRE_TABLES[wireType][+e.target.value];
                 if (w) { sW("copperDia", w.cu); sW("wireDia", w.cov); }
               }}
-              className="text-xs px-1 py-0.5 rounded w-32" style={{ border: "1px solid #C8CFD6", fontFamily: "Consolas,monospace" }}>
+              className="text-xs px-1 py-0.5 rounded w-32" style={{ border: "1px solid #22304d", fontFamily: "Consolas,monospace" }}>
               <option value="">— 선택 —</option>
               {WIRE_TABLES[wireType].map((w, i) => (
                 <option key={i} value={i}>{w.label} → 피복 {w.cov.toFixed(3)}</option>
@@ -1286,10 +1406,10 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
         <NumIn label="Copper Diameter" value={wind.copperDia} step={0.01} onChange={(v) => sW("copperDia", v)} />
         <NumIn label="Strands in Hand" value={wind.strands} step={1} onChange={(v) => sW("strands", v)} />
         <SectionHead color="#1E7A1E">Insulation / 슬롯 내부</SectionHead>
-        <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA" }}>
+        <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #22304d" }}>
           <span className="text-xs">Wedge Model</span>
           <select value={wind.wedgeModel} onChange={(e) => sW("wedgeModel", e.target.value)}
-            className="text-xs px-1 py-0.5 rounded" style={{ border: "1px solid #C8CFD6" }}>
+            className="text-xs px-1 py-0.5 rounded" style={{ border: "1px solid #22304d" }}>
             <option value="wedge">Wedge</option>
             <option value="wound">Wound Space</option>
             <option value="air">Air</option>
@@ -1299,7 +1419,7 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
         <NumIn label="Wedge Depth" value={wind.wedgeDepth} step={0.1} onChange={(v) => sW("wedgeDepth", v)} />
         <NumIn label="Coil Divider" value={wind.coilDivider} step={0.05} onChange={(v) => sW("coilDivider", v)} />
         <NumIn label="Conductor Separation" value={wind.condSep} step={0.01} onChange={(v) => sW("condSep", v)} />
-        <SectionHead color="#5C6B7A">계산 결과</SectionHead>
+        <SectionHead color="#7e8eac">계산 결과</SectionHead>
         <table className="w-full"><tbody>
           <Row label="Coils / Phase" value={wa.coilsPerPhase} />
           <Row label="Turns / Phase" value={res.turnsPerPhase} refv={showRef ? REF.turnsPerPhase : undefined} />
@@ -1328,10 +1448,10 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
       </div>
       {/* 중앙: 슬롯 단면 / 권선 배치도 전환 */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex gap-0.5 px-3 pt-1.5" style={{ background: "#F0F2F4", borderBottom: "1px solid #D5DBE1" }}>
+        <div className="flex gap-0.5 px-3 pt-1.5" style={{ background: "#0c1424", borderBottom: "1px solid #22304d" }}>
           {[["section", "슬롯 단면"], ["layout", "권선 배치도"]].map(([k, l]) => (
             <button key={k} onClick={() => setWindView(k)} className="text-xs px-3 py-1 rounded-t"
-              style={{ background: windView === k ? "#fff" : "#DDE2E7", border: "1px solid #C8CFD6", borderBottom: windView === k ? "1px solid #fff" : "1px solid #C8CFD6", marginBottom: -1, fontWeight: windView === k ? 600 : 400 }}>
+              style={{ background: windView === k ? "#101a30" : "transparent", border: `1px solid ${windView === k ? "#22304d" : "transparent"}`, borderBottom: "none", marginBottom: -1, fontWeight: windView === k ? 600 : 400, color: windView === k ? "#34d3e8" : "#7e8eac", boxShadow: windView === k ? "inset 0 2px 0 #34d3e8" : "none" }}>
               {l}
             </button>
           ))}
@@ -1339,9 +1459,9 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
         {windView === "section" ? <SlotViewer geo={geo} wind={wind} res={res} /> : <WindingLayout geo={geo} res={res} />}
       </div>
       {/* 우: 패턴/권선계수 */}
-      <div className="w-64 overflow-y-auto flex-shrink-0 p-2 flex flex-col gap-3" style={{ background: "#FAFBFC", borderLeft: "1px solid #D5DBE1" }}>
-        <div className="rounded" style={{ background: "#fff", border: "1px solid #D5DBE1" }}>
-          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>Winding Factors</div>
+      <div className="w-64 overflow-y-auto flex-shrink-0 p-2 flex flex-col gap-3" style={{ background: "#0c1424", borderLeft: "1px solid #22304d" }}>
+        <div className="rounded" style={{ background: "#101a30", border: "1px solid #22304d" }}>
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #22304d" }}>Winding Factors</div>
           <table className="text-xs w-full" style={{ fontFamily: "Consolas,monospace" }}>
             <tbody>
               {harmonics.map((h) => (
@@ -1354,10 +1474,10 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
           </table>
           {showRef && <div className="px-2 py-1 text-xs" style={{ color: "#1B7A2B" }}>참조 kw1 = 0.945214</div>}
         </div>
-        <div className="rounded" style={{ background: "#fff", border: "1px solid #D5DBE1" }}>
-          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>Radial Pattern (슬롯별 도체수)</div>
+        <div className="rounded" style={{ background: "#101a30", border: "1px solid #22304d" }}>
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #22304d" }}>Radial Pattern (슬롯별 도체수)</div>
           <table className="text-xs w-full" style={{ fontFamily: "Consolas,monospace" }}>
-            <thead><tr style={{ background: "#E8EBEE" }}>
+            <thead><tr style={{ background: "#0c1424" }}>
               <th className="px-1 py-0.5">Slot</th><th className="px-1 py-0.5">Tot</th>
               <th className="px-1 py-0.5" style={{ color: "#CC2222" }}>Ph1</th>
               <th className="px-1 py-0.5" style={{ color: "#1B7A2B" }}>Ph2</th>
@@ -1393,19 +1513,19 @@ function MaterialsTab({ mat, sM, res, showRef }) {
   const tdr = td + " text-right";
   const mono = { fontFamily: "Consolas,monospace" };
   const TR = ({ children, total }) => (
-    <tr style={{ borderTop: "1px solid #E2E6EA", background: total ? "#F1F4F6" : undefined }}>{children}</tr>
+    <tr style={{ borderTop: "1px solid #22304d", background: total ? "#0c1424" : undefined }}>{children}</tr>
   );
   if (!res) return null;
   return (
     <div className="h-full overflow-auto p-3">
-      <table className="text-xs" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
+      <table className="text-xs" style={{ background: "#101a30", border: "1px solid #22304d" }}>
         <thead>
-          <tr style={{ background: "#DCE3E9" }}>
+          <tr style={{ background: "#0c1424" }}>
             {["Component", "Material from Database", "Electrical Resistivity", "Magnet Br at 20°C", "Magnet Rel. Permeability", "Temp Coef Br", "Density", "Weight"].map((h) => (
-              <th key={h} className="px-2 py-1.5 font-semibold" style={{ borderLeft: "1px solid #C8CFD6" }}>{h}</th>
+              <th key={h} className="px-2 py-1.5 font-semibold" style={{ borderLeft: "1px solid #22304d" }}>{h}</th>
             ))}
           </tr>
-          <tr style={{ background: "#F1F4F6", color: "#2244AA" }}>
+          <tr style={{ background: "#0c1424", color: "#5e9bff" }}>
             <td className={td}>Units</td><td className={td}></td><td className={tdr}>Ohm.m</td>
             <td className={tdr}>Tesla</td><td className={td}></td><td className={tdr}>%/°C</td>
             <td className={tdr}>kg/m³</td><td className={tdr}>kg</td>
@@ -1423,7 +1543,7 @@ function MaterialsTab({ mat, sM, res, showRef }) {
           <TR>
             <td className={td}>Magnet</td>
             <td className={td}>
-              <select value={mat.magnet} onChange={(e) => pickMag(e.target.value)} className="text-xs px-1 py-0.5 rounded w-32" style={{ border: "1px solid #C8CFD6" }}>
+              <select value={mat.magnet} onChange={(e) => pickMag(e.target.value)} className="text-xs px-1 py-0.5 rounded w-32" style={{ border: "1px solid #22304d" }}>
                 {Object.keys(MAGNETS).map((k) => <option key={k}>{k}</option>)}
               </select>
             </td>
@@ -1434,17 +1554,17 @@ function MaterialsTab({ mat, sM, res, showRef }) {
         </tbody>
       </table>
       <div className="flex gap-3 mt-3 flex-wrap">
-        <div className="rounded" style={{ background: "#fff", border: "1px solid #D5DBE1" }}>
+        <div className="rounded" style={{ background: "#101a30", border: "1px solid #22304d" }}>
           <SectionHead color="#22BB22">자석 물성 편집</SectionHead>
           <NumIn label="Br @20°C [T]" value={mat.Br20} step={0.01} onChange={(v) => sM("Br20", v)} />
           <NumIn label="Temp Coef Br [%/°C]" value={mat.tcBr} step={0.005} onChange={(v) => sM("tcBr", v)} />
           <NumIn label="μr" value={mat.mur} step={0.01} onChange={(v) => sM("mur", v)} />
         </div>
-        <div className="rounded" style={{ background: "#fff", border: "1px solid #D5DBE1" }}>
+        <div className="rounded" style={{ background: "#101a30", border: "1px solid #22304d" }}>
           <SectionHead color="#E03030">강판 철손계수 (Steinmetz)</SectionHead>
           <NumIn label="kh (히스테리시스)" value={mat.kh} step={0.001} onChange={(v) => sM("kh", v)} />
           <NumIn label="ke (와전류)" value={mat.ke} step={1e-6} onChange={(v) => sM("ke", v)} />
-          <div className="px-2 py-1 text-xs" style={{ color: "#8893A0" }}>기본값: 20PNX1200F를 1250W FEA 철손으로 캘리브레이션</div>
+          <div className="px-2 py-1 text-xs" style={{ color: "#7e8eac" }}>기본값: 20PNX1200F를 1250W FEA 철손으로 캘리브레이션</div>
         </div>
       </div>
     </div>
@@ -1497,25 +1617,25 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
           {calc.currentDef === "peak" ? (
             <NumIn label="Line Current — Peak [A]" value={+(IlinePk.toFixed(2))} step={0.1} onChange={(v) => sC("IlineRms", v / Math.SQRT2)} />
           ) : (
-            <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA", background: "#F6F8FA" }}>
-              <span className="text-xs" style={{ color: "#8893A0" }}>Line Current — Peak [A]</span>
+            <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #22304d", background: "#0a1120" }}>
+              <span className="text-xs" style={{ color: "#7e8eac" }}>Line Current — Peak [A]</span>
               <span className="text-xs" style={{ fontFamily: "Consolas,monospace" }}>{IlinePk.toFixed(2)}</span>
             </div>
           )}
           {calc.currentDef === "rms" ? (
             <NumIn label="Line Current — RMS [A]" value={calc.IlineRms} step={0.1} onChange={(v) => sC("IlineRms", v)} />
           ) : (
-            <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA", background: "#F6F8FA" }}>
-              <span className="text-xs" style={{ color: "#8893A0" }}>Line Current — RMS [A]</span>
+            <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #22304d", background: "#0a1120" }}>
+              <span className="text-xs" style={{ color: "#7e8eac" }}>Line Current — RMS [A]</span>
               <span className="text-xs" style={{ fontFamily: "Consolas,monospace" }}>{calc.IlineRms.toFixed(2)}</span>
             </div>
           )}
-          <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA", background: "#F6F8FA" }}>
-            <span className="text-xs" style={{ color: "#8893A0" }}>Phase Current (RMS)</span>
+          <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #22304d", background: "#0a1120" }}>
+            <span className="text-xs" style={{ color: "#7e8eac" }}>Phase Current (RMS)</span>
             <span className="text-xs" style={{ fontFamily: "Consolas,monospace", fontWeight: 600 }}>{res ? res.IphRms.toFixed(2) : "—"} A</span>
           </div>
-          <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #E2E6EA", background: "#F6F8FA" }}>
-            <span className="text-xs" style={{ color: "#8893A0" }}>Phase Current Density (RMS)</span>
+          <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #22304d", background: "#0a1120" }}>
+            <span className="text-xs" style={{ color: "#7e8eac" }}>Phase Current Density (RMS)</span>
             <span className="text-xs" style={{ fontFamily: "Consolas,monospace" }}>{res ? res.Jrms.toFixed(3) : "—"} A/mm²</span>
           </div>
           <NumIn label="DC Bus Voltage [V]" value={calc.Vdc} step={1} onChange={(v) => sC("Vdc", v)} />
@@ -1547,7 +1667,7 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
           <NumIn label="슬롯누설 보정 cLs" value={calc.cLs} step={0.01} onChange={(v) => sC("cLs", v)} />
           <NumIn label="AC 동손 보정 cAC" value={calc.cAC} step={0.1} onChange={(v) => sC("cAC", v)} />
           <NumIn label="기타 손실 [W]" value={calc.otherLoss} step={0.5} onChange={(v) => sC("otherLoss", v)} />
-          <div className="px-2 py-1 text-xs" style={{ color: "#8893A0" }}>기본값은 1250W-jk FEA 캘리브레이션. 토폴로지가 다르면 재조정.</div>
+          <div className="px-2 py-1 text-xs" style={{ color: "#7e8eac" }}>기본값은 1250W-jk FEA 캘리브레이션. 토폴로지가 다르면 재조정.</div>
         </Box>
       </div>
       {/* ── Col 3: Performance ── */}
@@ -1563,7 +1683,7 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
               <Row label="Fundamental Freq" value={res.fe.toFixed(1)} unit="Hz" />
             </tbody></table>
           ) : (
-            <div className="text-xs py-4 text-center" style={{ color: "#8893A0" }}>
+            <div className="text-xs py-4 text-center" style={{ color: "#7e8eac" }}>
               아래 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하세요.
             </div>
           )}
@@ -1571,21 +1691,21 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
         <button
           onClick={() => setSolved(true)}
           className="w-full py-3 rounded font-semibold text-sm"
-          style={{ border: "1px solid #1A222C", background: solved ? "#1B7A2B" : "#fff", color: solved ? "#fff" : "#1A222C" }}>
+          style={{ border: `1px solid ${solved ? "#2bd47a" : "#34d3e8"}`, background: solved ? "linear-gradient(180deg,#23a35f,#1c8b50)" : "#101a30", color: solved ? "#fff" : "#34d3e8", boxShadow: solved ? "0 0 14px rgba(43,212,122,0.3)" : "0 0 10px rgba(52,211,232,0.15)" }}>
           {solved ? "✓ 해석 완료 — Output Data / Graphs 확인" : "Solve E-Magnetic Model"}
         </button>
-        <div className="text-xs mt-1.5" style={{ color: "#8893A0" }}>해석식(closed-form) 엔진 — Solve 시 즉시 계산됩니다. 입력을 바꾸면 다시 Solve 해야 합니다.</div>
+        <div className="text-xs mt-1.5" style={{ color: "#7e8eac" }}>해석식(closed-form) 엔진 — Solve 시 즉시 계산됩니다. 입력을 바꾸면 다시 Solve 해야 합니다.</div>
 
         <button onClick={runFemm} disabled={femmBusy}
           className="w-full py-3 rounded font-semibold text-sm mt-3"
           style={{ border: "1px solid #1B7A2B", background: femmBusy ? "#A8B2BC" : "#1B7A2B", color: "#fff", cursor: femmBusy ? "default" : "pointer" }}>
           {femmBusy ? "⏳ FEMM 해석 중… (수십 초~분)" : "▶ FEMM 해석 (진짜 FEA)"}
         </button>
-        <div className="text-xs mt-1.5" style={{ color: "#8893A0" }}>로컬 브릿지(python fea/femm_server.py) 필요. FEMM으로 다위치 FEA → 토크·코깅·자속밀도.</div>
-        {femmErr && <div className="text-xs mt-1 p-2 rounded" style={{ background: "#FBEAEA", color: "#B02020" }}>{femmErr}</div>}
+        <div className="text-xs mt-1.5" style={{ color: "#7e8eac" }}>로컬 브릿지(python fea/femm_server.py) 필요. FEMM으로 다위치 FEA → 토크·코깅·자속밀도.</div>
+        {femmErr && <div className="text-xs mt-1 p-2 rounded" style={{ background: "rgba(255,93,108,0.12)", color: "#ff8a94", border: "1px solid rgba(255,93,108,0.4)" }}>{femmErr}</div>}
         {femmRes && (
-          <div className="rounded mt-2" style={{ border: "1px solid #1B7A2B", background: "#F0F7F1" }}>
-            <div className="px-2 py-1 text-xs font-bold" style={{ color: "#1B7A2B", borderBottom: "1px solid #BBD9C0" }}>FEMM 기반 성능 (FEA)</div>
+          <div className="rounded mt-2" style={{ border: "1px solid #1B7A2B", background: "#0c1424" }}>
+            <div className="px-2 py-1 text-xs font-bold" style={{ color: "#1B7A2B", borderBottom: "1px solid #22304d" }}>FEMM 기반 성능 (FEA)</div>
             <table className="w-full"><tbody>
               <Row label="평균 토크 (FEA)" value={femmRes.avgTorque.toFixed(3)} unit="Nm" hl />
               <Row label="토크 리플 (FEA)" value={femmRes.torqueRipple.toFixed(2)} unit="%" />
@@ -1595,18 +1715,18 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
               {Number.isFinite(femmRes.BEMFpk) && <Row label="무부하 역기전력 피크 (FEA)" value={femmRes.BEMFpk.toFixed(2)} unit="V" />}
               {Number.isFinite(femmRes.Bt) && <Row label="치 자속밀도 (FEA, 부하)" value={femmRes.Bt.toFixed(3)} unit="T" />}
               {Number.isFinite(femmRes.By) && <Row label="요크 자속밀도 (FEA, 부하)" value={femmRes.By.toFixed(3)} unit="T" />}
-              <tr><td colSpan={3} style={{ borderTop: "1px solid #BBD9C0" }} /></tr>
+              <tr><td colSpan={3} style={{ borderTop: "1px solid #22304d" }} /></tr>
               <Row label="해석식 토크 (비교)" value={res.torque.toFixed(3)} unit="Nm" />
               {Number.isFinite(femmRes.Ke) && <Row label="해석식 Ke (비교)" value={res.Ke.toFixed(4)} unit="V·s/rad" />}
             </tbody></table>
-            <div className="px-2 py-1 text-xs" style={{ color: "#B26A00", background: "#FFF8EC", borderTop: "1px solid #BBD9C0" }}>
+            <div className="px-2 py-1 text-xs" style={{ color: "#f5a524", background: "rgba(245,165,36,0.1)", borderTop: "1px solid #22304d" }}>
               ⚠ 코깅 토크는 빠른 메시의 토크 계산 노이즈(~수십 mNm)보다 작아 <b>신뢰 불가</b>입니다. 정밀 코깅은 Maxwell/전용 미세메시 해석을 참조하세요. (토크·Ke·효율은 검증됨)
             </div>
             {Number.isFinite(femmRes.Ke) && res.pp > 0 && (
-              <div className="p-2" style={{ borderTop: "1px solid #BBD9C0" }}>
+              <div className="p-2" style={{ borderTop: "1px solid #22304d" }}>
                 {femmCal ? (
                   <button onClick={() => setFemmCal(null)} className="w-full py-2 rounded text-xs font-semibold"
-                    style={{ border: "1px solid #B26A00", background: "#FFF3E0", color: "#B26A00" }}>
+                    style={{ border: "1px solid #f5a524", background: "rgba(245,165,36,0.12)", color: "#f5a524" }}>
                     ✓ FEMM 보정 적용중 (λ={femmCal.lam.toFixed(4)}, kT={femmCal.kT ? femmCal.kT.toFixed(3) : "—"}) — 클릭하면 해제
                   </button>
                 ) : (
@@ -1622,7 +1742,7 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
                     ▶ 이 FEMM 결과로 보정 적용 (λ·토크(포화)·EMF·T-N·효율맵 전부 FEMM 기반)
                   </button>
                 )}
-                <div className="text-xs mt-1" style={{ color: "#8893A0" }}>
+                <div className="text-xs mt-1" style={{ color: "#7e8eac" }}>
                   보정하면 Output Data·Graphs·Thermal 이 FEMM λ·포화토크(kT) 기반으로 재계산됩니다 (효율맵은 빠른 엔진이 FEMM값으로 생성 — 점마다 FEMM 실행 X). 형상·권선·재질 변경 시 자동 해제.
                 </div>
               </div>
@@ -1637,14 +1757,14 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
 // ─── Output Data 탭 (Motor-CAD 하위탭 구조) ─────────────────────
 function OutputTab({ res, calc, showRef, solved }) {
   const [sub, setSub] = useState("drive");
-  if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하면 결과가 표시됩니다.</div>;
+  if (!solved) return <div className="p-6 text-sm" style={{ color: "#7e8eac" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하면 결과가 표시됩니다.</div>;
   if (!res) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
   const f = (v, d = 3) => Number(v).toFixed(d);
   const SUBS = [["drive", "Drive"], ["emag", "E-Magnetics"], ["flux", "Flux Densities"], ["loss", "Losses"], ["wdg", "Winding"], ["matl", "Materials"]];
   const Tbl = ({ children }) => (
-    <div className="rounded flex-1 min-w-80" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
+    <div className="rounded flex-1 min-w-80" style={{ background: "#101a30", border: "1px solid #22304d" }}>
       <table className="w-full">
-        <thead><tr style={{ background: "#DCE3E9" }}>
+        <thead><tr style={{ background: "#0c1424" }}>
           <th className="px-2 py-1.5 text-xs text-left font-semibold">Variable</th>
           <th className="px-2 py-1.5 text-xs text-right font-semibold">Value</th>
           <th className="px-2 py-1.5 text-xs text-left font-semibold">Units</th>
@@ -1659,15 +1779,15 @@ function OutputTab({ res, calc, showRef, solved }) {
   );
   return (
     <div className="h-full flex flex-col">
-      <div className="flex gap-0.5 px-3 pt-2" style={{ background: "#F0F2F4" }}>
+      <div className="flex gap-0.5 px-3 pt-2" style={{ background: "#0c1424" }}>
         {SUBS.map(([k, l]) => (
           <button key={k} onClick={() => setSub(k)} className="text-xs px-2.5 py-1 rounded-t"
-            style={{ background: sub === k ? "#fff" : "#DDE2E7", border: "1px solid #C8CFD6", borderBottom: sub === k ? "1px solid #fff" : "1px solid #C8CFD6", marginBottom: -1, fontWeight: sub === k ? 600 : 400 }}>
+            style={{ background: sub === k ? "#101a30" : "transparent", border: `1px solid ${sub === k ? "#22304d" : "transparent"}`, borderBottom: "none", marginBottom: -1, fontWeight: sub === k ? 600 : 400, color: sub === k ? "#34d3e8" : "#7e8eac", boxShadow: sub === k ? "inset 0 2px 0 #34d3e8" : "none" }}>
             {l}
           </button>
         ))}
       </div>
-      <div className="flex-1 overflow-auto p-3 flex gap-3 items-start flex-wrap" style={{ background: "#fff", borderTop: "1px solid #C8CFD6" }}>
+      <div className="flex-1 overflow-auto p-3 flex gap-3 items-start flex-wrap" style={{ background: "#101a30", borderTop: "1px solid #22304d" }}>
         {sub === "drive" && (<>
           <Tbl>
             {r("DC Bus Voltage", f(calc.Vdc, 0), "Volts", 48, true)}
@@ -1784,7 +1904,7 @@ function OutputTab({ res, calc, showRef, solved }) {
             {r("Total Weight (Active)", f(res.mActive, 3), "kg", 1.657)}
           </Tbl>
         )}
-        <div className="w-full text-xs" style={{ color: "#8893A0" }}>녹색 열 = 1250W-jk Motor-CAD FEA 참조값. (추정) 표기는 해석식 근사 항목.</div>
+        <div className="w-full text-xs" style={{ color: "#7e8eac" }}>녹색 열 = 1250W-jk Motor-CAD FEA 참조값. (추정) 표기는 해석식 근사 항목.</div>
       </div>
     </div>
   );
@@ -1800,9 +1920,9 @@ function Plot({ title, sub, series, h = 190, step = false }) {
   const sx = (x) => P.l + ((x - x0) / (x1 - x0)) * (Wp - P.l - P.r);
   const sy = (y) => h - P.b - ((y - y0) / (y1 - y0)) * (h - P.t - P.b);
   return (
-    <div className="rounded" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
-      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
-        {title} {sub && <span className="font-normal" style={{ color: "#8893A0" }}>{sub}</span>}
+    <div className="rounded" style={{ background: "#101a30", border: "1px solid #22304d" }}>
+      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #22304d" }}>
+        {title} {sub && <span className="font-normal" style={{ color: "#7e8eac" }}>{sub}</span>}
       </div>
       <svg width={Wp} height={h} style={{ display: "block" }}>
         {Array.from({ length: 5 }, (_, i) => {
@@ -1810,7 +1930,7 @@ function Plot({ title, sub, series, h = 190, step = false }) {
           return (
             <g key={"y" + i}>
               <line x1={P.l} x2={Wp - P.r} y1={sy(yv)} y2={sy(yv)} stroke="#EEF1F4" />
-              <text x={P.l - 4} y={sy(yv) + 3} fontSize="9" fill="#8893A0" textAnchor="end">{yv.toPrecision(3)}</text>
+              <text x={P.l - 4} y={sy(yv) + 3} fontSize="9" fill="#7e8eac" textAnchor="end">{yv.toPrecision(3)}</text>
             </g>
           );
         })}
@@ -1819,11 +1939,11 @@ function Plot({ title, sub, series, h = 190, step = false }) {
           return (
             <g key={"x" + i}>
               <line y1={P.t} y2={h - P.b} x1={sx(xv)} x2={sx(xv)} stroke="#F4F6F8" />
-              <text y={h - P.b + 12} x={sx(xv)} fontSize="9" fill="#8893A0" textAnchor="middle">{Math.round(xv)}</text>
+              <text y={h - P.b + 12} x={sx(xv)} fontSize="9" fill="#7e8eac" textAnchor="middle">{Math.round(xv)}</text>
             </g>
           );
         })}
-        {y0 < 0 && y1 > 0 && <line x1={P.l} x2={Wp - P.r} y1={sy(0)} y2={sy(0)} stroke="#C8CFD6" />}
+        {y0 < 0 && y1 > 0 && <line x1={P.l} x2={Wp - P.r} y1={sy(0)} y2={sy(0)} stroke="#22304d" />}
         {series.map((s, k) => (
           <polyline key={k} fill="none" stroke={s.color} strokeWidth="1.4"
             points={s.y.map((yv, i) => {
@@ -1845,9 +1965,9 @@ function Bars({ title, sub, values, h = 190 }) {
   const vmax = Math.max(...values, 1e-9) * 1.08;
   const bw = (Wp - P.l - P.r) / values.length;
   return (
-    <div className="rounded" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
-      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
-        {title} {sub && <span className="font-normal" style={{ color: "#8893A0" }}>{sub}</span>}
+    <div className="rounded" style={{ background: "#101a30", border: "1px solid #22304d" }}>
+      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #22304d" }}>
+        {title} {sub && <span className="font-normal" style={{ color: "#7e8eac" }}>{sub}</span>}
       </div>
       <svg width={Wp} height={h} style={{ display: "block" }}>
         {values.map((v, i) => {
@@ -1855,10 +1975,10 @@ function Bars({ title, sub, values, h = 190 }) {
           return <rect key={i} x={P.l + i * bw + 1} width={Math.max(bw - 2, 1)} y={h - P.b - bh} height={bh} fill="#CC2222" />;
         })}
         {values.map((_, i) => ((i + 1) % 2 === 0 ? (
-          <text key={"t" + i} x={P.l + i * bw + bw / 2} y={h - P.b + 12} fontSize="9" fill="#8893A0" textAnchor="middle">{i + 1}</text>
+          <text key={"t" + i} x={P.l + i * bw + bw / 2} y={h - P.b + 12} fontSize="9" fill="#7e8eac" textAnchor="middle">{i + 1}</text>
         ) : null))}
-        <text x={P.l - 4} y={P.t + 4} fontSize="9" fill="#8893A0" textAnchor="end">{vmax.toPrecision(3)}</text>
-        <line x1={P.l} x2={Wp - P.r} y1={h - P.b} y2={h - P.b} stroke="#C8CFD6" />
+        <text x={P.l - 4} y={P.t + 4} fontSize="9" fill="#7e8eac" textAnchor="end">{vmax.toPrecision(3)}</text>
+        <line x1={P.l} x2={Wp - P.r} y1={h - P.b} y2={h - P.b} stroke="#22304d" />
       </svg>
     </div>
   );
@@ -1871,12 +1991,12 @@ function PhasorPlot({ chains }) {
   const s = (v) => (v / rmax) * (C - 14);
   const cols = ["#CC2222", "#1B7A2B", "#2244CC"];
   return (
-    <div className="rounded" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
-      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
-        Winding Phasors <span className="font-normal" style={{ color: "#8893A0" }}>코일 EMF 페이저 체인</span>
+    <div className="rounded" style={{ background: "#101a30", border: "1px solid #22304d" }}>
+      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #22304d" }}>
+        Winding Phasors <span className="font-normal" style={{ color: "#7e8eac" }}>코일 EMF 페이저 체인</span>
       </div>
       <svg width={Wp} height={Wp} style={{ display: "block" }}>
-        <circle cx={C} cy={C} r={C - 14} fill="none" stroke="#D5DBE1" strokeDasharray="3 3" />
+        <circle cx={C} cy={C} r={C - 14} fill="none" stroke="#22304d" strokeDasharray="3 3" />
         <line x1={14} x2={Wp - 14} y1={C} y2={C} stroke="#EEF1F4" />
         <line y1={14} y2={Wp - 14} x1={C} x2={C} stroke="#EEF1F4" />
         {chains.map((pts, p) => (
@@ -1964,9 +2084,9 @@ function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
     }
   }
   return (
-    <div className="rounded w-full" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
-      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
-        Efficiency Map <span className="font-normal" style={{ color: "#8893A0" }}>속도-토크 효율 [%] (추정 · 손실 속도외삽: 철손 pE1.8·기타 ∝n)</span>
+    <div className="rounded w-full" style={{ background: "#101a30", border: "1px solid #22304d" }}>
+      <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #22304d" }}>
+        Efficiency Map <span className="font-normal" style={{ color: "#7e8eac" }}>속도-토크 효율 [%] (추정 · 손실 속도외삽: 철손 pE1.8·기타 ∝n)</span>
       </div>
       <svg width={Wp} height={h} style={{ display: "block" }}>
         <defs><clipPath id="effclip"><polygon points={clipStr} /></clipPath></defs>
@@ -1982,14 +2102,14 @@ function EffMap({ speeds, torques, grid, env, op, h = 340 }) {
             <text x={tx} y={ly + 5} fontSize="9" fill="#111" textAnchor={anc}>{Math.round(op.speed)}rpm · {op.torque.toFixed(2)}Nm · {op.eff != null ? op.eff.toFixed(1) + "%" : ""}</text>
           </g>;
         })()}
-        {Array.from({ length: 6 }, (_, i) => { const xv = xMax * i / 5; return <text key={"x" + i} x={sx(xv)} y={h - P.b + 12} fontSize="9" fill="#5C6B7A" textAnchor="middle">{Math.round(xv)}</text>; })}
-        {Array.from({ length: 5 }, (_, i) => { const yv = yMax * i / 4; return <text key={"y" + i} x={P.l - 4} y={sy(yv) + 3} fontSize="9" fill="#5C6B7A" textAnchor="end">{yv.toFixed(1)}</text>; })}
-        <text x={(P.l + Wp - P.r) / 2} y={h - 2} fontSize="9" fill="#8893A0" textAnchor="middle">Speed [rpm]</text>
-        <text x={12} y={h / 2} fontSize="9" fill="#8893A0" textAnchor="middle" transform={`rotate(-90 12 ${h / 2})`}>Torque [Nm]</text>
+        {Array.from({ length: 6 }, (_, i) => { const xv = xMax * i / 5; return <text key={"x" + i} x={sx(xv)} y={h - P.b + 12} fontSize="9" fill="#7e8eac" textAnchor="middle">{Math.round(xv)}</text>; })}
+        {Array.from({ length: 5 }, (_, i) => { const yv = yMax * i / 4; return <text key={"y" + i} x={P.l - 4} y={sy(yv) + 3} fontSize="9" fill="#7e8eac" textAnchor="end">{yv.toFixed(1)}</text>; })}
+        <text x={(P.l + Wp - P.r) / 2} y={h - 2} fontSize="9" fill="#7e8eac" textAnchor="middle">Speed [rpm]</text>
+        <text x={12} y={h / 2} fontSize="9" fill="#7e8eac" textAnchor="middle" transform={`rotate(-90 12 ${h / 2})`}>Torque [Nm]</text>
         {Array.from({ length: NB }, (_, i) => { const yy = P.t + (cbH * i) / NB; const tBand = 1 - (i + 0.5) / NB; return (
           <rect key={"cb" + i} x={Wp - P.r + 18} y={yy} width={14} height={cbH / NB + 0.6} fill={jetColor(tBand)} shapeRendering="crispEdges" />); })}
         {Array.from({ length: NB + 1 }, (_, i) => { const e = top - (span * i) / NB; const yy = P.t + (cbH * i) / NB; return (
-          <text key={"cbt" + i} x={Wp - P.r + 35} y={yy + 3} fontSize="8" fill="#5C6B7A">{i === NB ? "≤" + e.toFixed(0) : e.toFixed(1)}</text>); })}
+          <text key={"cbt" + i} x={Wp - P.r + 35} y={yy + 3} fontSize="8" fill="#7e8eac">{i === NB ? "≤" + e.toFixed(0) : e.toFixed(1)}</text>); })}
       </svg>
     </div>
   );
@@ -2122,7 +2242,7 @@ function GraphsTab({ res, calc, solved }) {
       tnSpeed, tnTorque, tnPower, tnTorqueP, baseSpeed, tnPmax, opSpeed: calc.speed, opTorque: res.torque,
       effSpeeds, effTorques, effGrid };
   }, [res, calc]);
-  if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하면 파형이 표시됩니다.</div>;
+  if (!solved) return <div className="p-6 text-sm" style={{ color: "#7e8eac" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 눌러 해석을 실행하면 파형이 표시됩니다.</div>;
   if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
   return (
     <div className="h-full overflow-auto p-3 flex flex-wrap gap-3" style={{ alignContent: "flex-start" }}>
@@ -2142,7 +2262,7 @@ function GraphsTab({ res, calc, solved }) {
         ]} />
       <Plot title="Winding MMF" sub="슬롯 스텝 · ia=1, ib=ic=−0.5 [At]" step
         series={[
-          { x: data.slotX, y: data.mTot, color: "#1A222C", label: "Sum" },
+          { x: data.slotX, y: data.mTot, color: "#9fb2d4", label: "Sum" },
           { x: data.slotX, y: data.m1, color: "#CC2222", label: "Ph1" },
         ]} />
       <Bars title="MMF Harmonics" sub="공간(기계) 고조파 [At] — 극쌍수에서 피크" values={data.mag} />
@@ -2159,7 +2279,7 @@ function GraphsTab({ res, calc, solved }) {
         ]} />
       <EffMap speeds={data.effSpeeds} torques={data.effTorques} grid={data.effGrid}
         env={{ x: data.tnSpeed, y: data.tnTorqueP }} op={{ speed: data.opSpeed, torque: data.opTorque, eff: res.eff }} />
-      <div className="w-full text-xs" style={{ color: "#8893A0" }}>
+      <div className="w-full text-xs" style={{ color: "#7e8eac" }}>
         모든 파형은 해석식 합성 추정치 — 슬롯팅·포화·코깅 미반영. 정밀 파형은 Motor-CAD/Maxwell FEA로 검증.
       </div>
     </div>
@@ -2233,12 +2353,12 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
     for (let i = 0; i <= NPT; i++) { const t = (tMax * i) / NPT; tmin.push(t / 60); temp.push(Ta + (Tss - Ta) * (1 - Math.exp(-t / tau))); }
     return { T, hot, Qtot, Rslot, Rcuax, Rendair, Ryoke, Rconv, Rgap, Ahouse, Dh: Dh * 1e3, Lh: Lh * 1e3, Cth, tau, Tss, tmin, temp };
   }, [geo, wind, calc, res, therm]);
-  if (!solved) return <div className="p-6 text-sm" style={{ color: "#5C6B7A" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 누른 뒤 표시됩니다 (손실값 필요).</div>;
+  if (!solved) return <div className="p-6 text-sm" style={{ color: "#7e8eac" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 누른 뒤 표시됩니다 (손실값 필요).</div>;
   if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
   const Row = ({ k, v, u, c }) => (
-    <div className="flex items-center justify-between px-2 py-1 text-xs" style={{ borderTop: "1px solid #E2E6EA" }}>
-      <span style={{ color: "#5C6B7A" }}>{k}</span>
-      <span style={{ fontFamily: "Consolas,monospace", fontWeight: 600, color: c || "#1A222C" }}>{v}{u && <span style={{ color: "#8893A0", fontWeight: 400 }}> {u}</span>}</span>
+    <div className="flex items-center justify-between px-2 py-1 text-xs" style={{ borderTop: "1px solid #22304d" }}>
+      <span style={{ color: "#7e8eac" }}>{k}</span>
+      <span style={{ fontFamily: "JetBrains Mono,Consolas,monospace", fontWeight: 600, color: c || "#e6edf7" }}>{v}{u && <span style={{ color: "#7e8eac", fontWeight: 400 }}> {u}</span>}</span>
     </div>
   );
   const setCool = (t) => { sT("coolType", t); sT("hConv", COOL_H[t]); };
@@ -2270,8 +2390,8 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
   return (
     <div className="flex h-full overflow-auto gap-3 p-3 items-start">
       <div className="w-72 flex-shrink-0">
-        <fieldset className="rounded mb-2" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
-          <legend className="text-xs font-bold px-1 ml-2" style={{ color: "#2A3540" }}>냉각 / 하우징</legend>
+        <fieldset className="rounded mb-2" style={{ border: "1px solid #22304d", background: "#101a30" }}>
+          <legend className="text-xs font-bold px-1 ml-2" style={{ color: "#c4d0e4" }}>냉각 / 하우징</legend>
           <div className="text-xs font-semibold px-2 mt-1">냉각 방식:</div>
           <Radio group="cool" val="natural" label="자연대류 (h≈10)" cur={therm.coolType} onPick={setCool} />
           <Radio group="cool" val="forced" label="강제공냉 (h≈60)" cur={therm.coolType} onPick={setCool} />
@@ -2284,14 +2404,14 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
           <NumIn label="라이너 열전도 k [W/mK]" value={therm.kLiner} step={0.05} onChange={(v) => sT("kLiner", v)} />
           <NumIn label="함침 열전도 k [W/mK]" value={therm.kImpreg} step={0.05} onChange={(v) => sT("kImpreg", v)} />
         </fieldset>
-        <div className="text-xs px-1" style={{ color: "#8893A0" }}>집중정수 추정 · 자연대류 텍스트북 기본값. 절대값은 열 측정/FEA로 보정.</div>
+        <div className="text-xs px-1" style={{ color: "#7e8eac" }}>집중정수 추정 · 자연대류 텍스트북 기본값. 절대값은 열 측정/FEA로 보정.</div>
       </div>
       <div className="w-80 flex-shrink-0">
-        <div className="rounded" style={{ border: "1px solid #C8CFD6", background: "#fff" }}>
-          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>부품별 온도 (정상상태)</div>
-          <div className="px-3 py-3 text-center" style={{ background: "#FBF4EC" }}>
-            <div className="text-xs" style={{ color: "#8893A0" }}>권선 핫스팟 포화온도 (예측)</div>
-            <div style={{ fontSize: 30, fontWeight: 700, color: data.hot > 130 ? "#B02020" : "#1B5E20", fontFamily: "Consolas,monospace" }}>{data.hot.toFixed(1)} °C</div>
+        <div className="rounded" style={{ border: "1px solid #22304d", background: "#101a30" }}>
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #22304d" }}>부품별 온도 (정상상태)</div>
+          <div className="px-3 py-3 text-center" style={{ background: "#0a1120" }}>
+            <div className="text-xs" style={{ color: "#7e8eac" }}>권선 핫스팟 포화온도 (예측)</div>
+            <div style={{ fontSize: 30, fontWeight: 700, color: data.hot > 130 ? "#ff5d6c" : "#2bd47a", fontFamily: "JetBrains Mono,Consolas,monospace" }}>{data.hot.toFixed(1)} °C</div>
           </div>
           <Row k="권선 핫스팟" v={data.hot.toFixed(1)} u="°C" c="#B02020" />
           <Row k="엔드와인딩" v={data.T[1].toFixed(1)} u="°C" c={data.T[1] >= data.T[0] ? "#B02020" : undefined} />
@@ -2302,7 +2422,7 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
           <Row k="로터" v={data.T[5].toFixed(1)} u="°C" />
           <Row k="주위" v={therm.ambient.toFixed(1)} u="°C" />
           <Row k="총 발열 Q" v={data.Qtot.toFixed(1)} u="W" />
-          <div className="px-2 py-1 text-xs font-bold" style={{ borderTop: "2px solid #D5DBE1", background: "#F1F4F6" }}>열저항 / 하우징</div>
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderTop: "2px solid #22304d", background: "#0c1424" }}>열저항 / 하우징</div>
           <Row k="활성권선→철심 R" v={data.Rslot.toFixed(3)} u="K/W" />
           <Row k="엔드→하우징 R" v={data.Rendair.toFixed(3)} u="K/W" />
           <Row k="철심→하우징 R" v={data.Ryoke.toFixed(3)} u="K/W" />
@@ -2316,29 +2436,29 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
         {Math.abs(data.hot - calc.Tcu) > 10 && <div className="text-xs mt-1 px-1" style={{ color: "#B5622D" }}>예측 권선온도 {data.hot.toFixed(0)}°C ≠ 입력 {calc.Tcu}°C. 정밀화하려면 Calculation의 Armature Winding Temp를 {data.hot.toFixed(0)}로 맞추고 재Solve.</div>}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="rounded mb-2" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
-          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
-            하우징 축단면 열지도 <span className="font-normal" style={{ color: "#8893A0" }}>부품 온도 색칠 · 하우징 {data.Dh.toFixed(0)}×{data.Lh.toFixed(0)}mm</span>
+        <div className="rounded mb-2" style={{ background: "#101a30", border: "1px solid #22304d" }}>
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #22304d" }}>
+            하우징 축단면 열지도 <span className="font-normal" style={{ color: "#7e8eac" }}>부품 온도 색칠 · 하우징 {data.Dh.toFixed(0)}×{data.Lh.toFixed(0)}mm</span>
           </div>
           <svg width={Wv} height={Hv} style={{ display: "block" }}>
             <rect x="0" y="0" width={Wv} height={Hv} fill="#F7F8FA" />
-            <line x1={mxv} y1={cyv} x2={Wv - mxv} y2={cyv} stroke="#C8CFD6" strokeDasharray="4 3" />
+            <line x1={mxv} y1={cyv} x2={Wv - mxv} y2={cyv} stroke="#22304d" strokeDasharray="4 3" />
             {parts}
-            <text x={SXv(0)} y={SYv(Rh) - 4} fontSize="9" fill="#5C6B7A" textAnchor="middle">하우징 Ø{data.Dh.toFixed(0)} · 길이 {data.Lh.toFixed(0)}mm</text>
-            <text x={SXv(0)} y={cyv + 3} fontSize="8" fill="#5C6B7A" textAnchor="middle">샤프트</text>
+            <text x={SXv(0)} y={SYv(Rh) - 4} fontSize="9" fill="#7e8eac" textAnchor="middle">하우징 Ø{data.Dh.toFixed(0)} · 길이 {data.Lh.toFixed(0)}mm</text>
+            <text x={SXv(0)} y={cyv + 3} fontSize="8" fill="#7e8eac" textAnchor="middle">샤프트</text>
             {[["하우징", data.T[3]], ["철심", data.T[2]], ["엔드와인딩", data.T[1]], ["자석", data.T[4]]].map(([l, T], i) => (
               <g key={i}><rect x={Wv - 96} y={10 + i * 14} width={10} height={10} fill={tc(T)} stroke="#0003" />
                 <text x={Wv - 82} y={19 + i * 14} fontSize="8" fill="#333">{l} {T.toFixed(0)}°</text></g>
             ))}
           </svg>
-          <div className="px-2 pb-1 text-xs" style={{ color: "#8893A0" }}>파랑 {Tmn.toFixed(0)}° → 적색 {Tmx.toFixed(0)}° · 하우징 외경/길이를 바꾸면 단면이 변합니다.</div>
+          <div className="px-2 pb-1 text-xs" style={{ color: "#7e8eac" }}>파랑 {Tmn.toFixed(0)}° → 적색 {Tmx.toFixed(0)}° · 하우징 외경/길이를 바꾸면 단면이 변합니다.</div>
         </div>
         <Plot title="포화온도 예측 (온도–시간)" sub={"정상상태 " + data.Tss.toFixed(1) + "°C · 시정수 τ " + (data.tau / 60).toFixed(1) + "분 · ≈" + (5 * data.tau / 60).toFixed(0) + "분 후 포화"}
           h={300} series={[
             { x: data.tmin, y: data.temp, color: "#B02020", label: "Coil Temp [°C] vs 분" },
-            { x: [0, data.tmin[data.tmin.length - 1]], y: [data.Tss, data.Tss], color: "#8893A0", label: "포화온도" },
+            { x: [0, data.tmin[data.tmin.length - 1]], y: [data.Tss, data.Tss], color: "#7e8eac", label: "포화온도" },
           ]} />
-        <div className="text-xs mt-1 px-1" style={{ color: "#8893A0" }}>고정 운전점에서 권선이 가열되며 정상상태(포화온도)로 수렴. τ = 열용량×열저항. Motor-CAD 포화온도 예측곡선 대응(추정).</div>
+        <div className="text-xs mt-1 px-1" style={{ color: "#7e8eac" }}>고정 운전점에서 권선이 가열되며 정상상태(포화온도)로 수렴. τ = 열용량×열저항. Motor-CAD 포화온도 예측곡선 대응(추정).</div>
       </div>
     </div>
   );
@@ -2413,19 +2533,19 @@ function WindingLayout({ geo, res }) {
 
   const Btn = ({ v, label }) => (
     <button onClick={() => setPh(v)} className="text-xs px-2.5 py-1 rounded"
-      style={{ border: "1px solid #C8CFD6", background: ph === v ? (v < 0 ? "#1A222C" : cols[v]) : "#fff", color: ph === v ? "#fff" : "#2A3540", fontWeight: ph === v ? 600 : 400 }}>
+      style={{ border: "1px solid #22304d", background: ph === v ? (v < 0 ? "#0c1424" : cols[v]) : "#0a1120", color: ph === v ? "#fff" : "#7e8eac", fontWeight: ph === v ? 600 : 400 }}>
       {label}
     </button>
   );
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <div className="flex items-center gap-1.5 px-3 py-1.5" style={{ borderBottom: "1px solid #D5DBE1" }}>
-        <span className="text-xs font-semibold mr-1" style={{ color: "#2A3540" }}>상 표시:</span>
+      <div className="flex items-center gap-1.5 px-3 py-1.5" style={{ borderBottom: "1px solid #22304d" }}>
+        <span className="text-xs font-semibold mr-1" style={{ color: "#c4d0e4" }}>상 표시:</span>
         <Btn v={-1} label="전체" /><Btn v={0} label="Ph1" /><Btn v={1} label="Ph2" /><Btn v={2} label="Ph3" />
         <div className="flex-1" />
-        <span className="text-xs" style={{ color: "#8893A0" }}>× 들어감 · • 나옴 · 실선=엔드턴 · U1/V1/W1=In(상 시작) · U2/V2/W2=Out(상 끝)</span>
+        <span className="text-xs" style={{ color: "#7e8eac" }}>× 들어감 · • 나옴 · 실선=엔드턴 · U1/V1/W1=In(상 시작) · U2/V2/W2=Out(상 끝)</span>
       </div>
-      <div className="flex-1 flex items-center justify-center min-h-0 overflow-auto" style={{ background: "#fff" }}>
+      <div className="flex-1 flex items-center justify-center min-h-0 overflow-auto" style={{ background: "#101a30" }}>
         <svg width={size} height={size}>
           <circle cx={C} cy={C} r={RoL * sc} fill="#FBE9E9" stroke="#B02020" strokeWidth="1.2" />
           <circle cx={C} cy={C} r={Rb * sc} fill="#fff" stroke="#B02020" strokeWidth="0.8" />
@@ -2438,11 +2558,11 @@ function WindingLayout({ geo, res }) {
           {terms}
           {Array.from({ length: Ns }, (_, k) => {
             const [lx, ly] = PR(RoL * 1.14, ang(k));
-            return <text key={"n" + k} x={lx} y={ly + 3} fontSize="10" fill="#5C6B7A" textAnchor="middle">{k + 1}</text>;
+            return <text key={"n" + k} x={lx} y={ly + 3} fontSize="10" fill="#7e8eac" textAnchor="middle">{k + 1}</text>;
           })}
         </svg>
       </div>
-      <div className="flex items-center gap-4 px-3 py-1 text-xs" style={{ background: "#1A222C", color: "#C8CFD6", fontFamily: "Consolas,monospace" }}>
+      <div className="flex items-center gap-4 px-3 py-1 text-xs" style={{ background: "#1A222C", color: "#22304d", fontFamily: "Consolas,monospace" }}>
         <span>{Ns}슬롯 / {poles}극 · 3상 2층 Lap · Throw {wa.coils.length ? Math.abs(wa.coils[0].ret - wa.coils[0].go) || 1 : 1}</span>
         <div className="flex-1" />
         <span>코일 {wa.coils.length}개 (상당 {wa.coilsPerPhase}) · kw1 {res.kw1.toFixed(4)}</span>
