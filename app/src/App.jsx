@@ -1465,7 +1465,7 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
           <table className="text-xs w-full" style={{ fontFamily: "Consolas,monospace" }}>
             <tbody>
               {harmonics.map((h) => (
-                <tr key={h} style={{ borderTop: "1px solid #EEF1F4", background: h === 1 ? "#FCF6EE" : undefined }}>
+                <tr key={h} style={{ borderTop: "1px solid #22304d", background: h === 1 ? "rgba(52,211,232,0.1)" : undefined }}>
                   <td className="px-3 py-0.5 text-center">{h}</td>
                   <td className="px-3 py-0.5 text-right">{wa.kw(h).toFixed(6)}</td>
                 </tr>
@@ -1488,7 +1488,7 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
               {wa.table.map((_, i) => {
                 const r = wa.table[(i + wa.table.length - 1) % wa.table.length];
                 return (
-                  <tr key={i} style={{ borderTop: "1px solid #EEF1F4" }}>
+                  <tr key={i} style={{ borderTop: "1px solid #22304d" }}>
                     <td className="px-1 text-center">{i + 1}</td>
                     <td className="px-1 text-center">{Math.abs(r[0]) + Math.abs(r[1]) + Math.abs(r[2])}</td>
                     {/* Motor-CAD All Phases와 동일하게 크기(절대값) 표시 — 권선 방향(go/return)은 배치도 ×/•로 */}
@@ -1929,7 +1929,7 @@ function Plot({ title, sub, series, h = 190, step = false }) {
           const yv = y0 + ((y1 - y0) * i) / 4;
           return (
             <g key={"y" + i}>
-              <line x1={P.l} x2={Wp - P.r} y1={sy(yv)} y2={sy(yv)} stroke="#EEF1F4" />
+              <line x1={P.l} x2={Wp - P.r} y1={sy(yv)} y2={sy(yv)} stroke="#1a2740" />
               <text x={P.l - 4} y={sy(yv) + 3} fontSize="9" fill="#7e8eac" textAnchor="end">{yv.toPrecision(3)}</text>
             </g>
           );
@@ -1997,8 +1997,8 @@ function PhasorPlot({ chains }) {
       </div>
       <svg width={Wp} height={Wp} style={{ display: "block" }}>
         <circle cx={C} cy={C} r={C - 14} fill="none" stroke="#22304d" strokeDasharray="3 3" />
-        <line x1={14} x2={Wp - 14} y1={C} y2={C} stroke="#EEF1F4" />
-        <line y1={14} y2={Wp - 14} x1={C} x2={C} stroke="#EEF1F4" />
+        <line x1={14} x2={Wp - 14} y1={C} y2={C} stroke="#1a2740" />
+        <line y1={14} y2={Wp - 14} x1={C} x2={C} stroke="#1a2740" />
         {chains.map((pts, p) => (
           <g key={p}>
             <polyline fill="none" stroke={cols[p]} strokeWidth="1.5"
