@@ -2659,7 +2659,7 @@ function WindingLayout({ geo, res }) {
     const n = sides.length;
     sides.forEach((s, j) => {
       const aoff = n <= 1 ? 0 : ((j / (n - 1)) - 0.5) * 2 * dA;
-      marks.push(marker(Rmid, ang(k) + aoff, s.dir > 0, cols[s.phase], `m${k}_${j}`));
+      marks.push(marker(Rmid, ang(k) + aoff, s.dir < 0, cols[s.phase], `m${k}_${j}`));
     });
   });
 
