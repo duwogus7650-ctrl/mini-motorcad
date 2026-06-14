@@ -2057,6 +2057,28 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
     </div>
   );
   const setCool = (t) => { sT("coolType", t); sT("hConv", COOL_H[t]); };
+  // 하우징 축단면 열지도 (부품 온도로 색칠) — 치수 시각화 + 미니 thermal map
+  const Rh = data.Dh / 2, Rsl = geo.statorLamDia / 2, Rb = geo.statorBore / 2;
+  const Rro = (geo.statorBore - 2 * geo.airgap) / 2, Rsh = geo.shaftDia / 2, Rmi = Rro - geo.magnetThickness;
+  const Lh = data.Lh, Lstk = geo.stackLength, Lend = Math.max(res.MLT / 2 - geo.stackLength, 4);
+  const Wv = 520, Hv = 250, mxv = 22, xMx = Lh / 2 + Lend + 4, yMx = Rh + 4;
+  const scv = Math.min((Wv - 2 * mxv) / (2 * xMx), (Hv - 2 * mxv) / (2 * yMx)), cxv = Wv / 2, cyv = Hv / 2;
+  const SXv = (x) => cxv + x * scv, SYv = (r) => cyv - r * scv;
+  const Tmn = therm.ambient, Tmx = Math.max(...data.T, Tmn + 1), tc = (T) => jetColor((T - Tmn) / (Tmx - Tmn));
+  const band = (x0, x1, r0, r1, T, key) => [
+    <rect key={key + "t"} x={SXv(x0)} y={SYv(r1)} width={(x1 - x0) * scv} height={(r1 - r0) * scv} fill={tc(T)} stroke="#00000022" strokeWidth="0.5" />,
+    <rect key={key + "b"} x={SXv(x0)} y={SYv(-r0)} width={(x1 - x0) * scv} height={(r1 - r0) * scv} fill={tc(T)} stroke="#00000022" strokeWidth="0.5" />,
+  ];
+  const parts = [
+    ...band(-Lh / 2, Lh / 2, Rsl, Rh, data.T[3], "hou"),
+    ...band(-Lstk / 2, Lstk / 2, Rb, Rsl, data.T[2], "fe"),
+    ...band(-Lstk / 2, Lstk / 2, Rb, Rb + 0.45 * (Rsl - Rb), data.T[0], "act"),
+    ...band(-Lstk / 2 - Lend, -Lstk / 2, Rb, Rb + 0.6 * (Rsl - Rb), data.T[1], "ewl"),
+    ...band(Lstk / 2, Lstk / 2 + Lend, Rb, Rb + 0.6 * (Rsl - Rb), data.T[1], "ewr"),
+    ...band(-Lstk / 2, Lstk / 2, Rmi, Rro, data.T[4], "mag"),
+    ...band(-Lstk / 2, Lstk / 2, Rsh, Rmi, data.T[5], "rot"),
+    ...band(-Lh / 2, Lh / 2, 0, Rsh, data.T[5], "sh"),
+  ];
   return (
     <div className="flex h-full overflow-auto gap-3 p-3 items-start">
       <div className="w-72 flex-shrink-0">
@@ -2106,6 +2128,23 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
         {Math.abs(data.hot - calc.Tcu) > 10 && <div className="text-xs mt-1 px-1" style={{ color: "#B5622D" }}>예측 권선온도 {data.hot.toFixed(0)}°C ≠ 입력 {calc.Tcu}°C. 정밀화하려면 Calculation의 Armature Winding Temp를 {data.hot.toFixed(0)}로 맞추고 재Solve.</div>}
       </div>
       <div className="flex-1 min-w-0">
+        <div className="rounded mb-2" style={{ background: "#fff", border: "1px solid #C8CFD6" }}>
+          <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #D5DBE1" }}>
+            하우징 축단면 열지도 <span className="font-normal" style={{ color: "#8893A0" }}>부품 온도 색칠 · 하우징 {data.Dh.toFixed(0)}×{data.Lh.toFixed(0)}mm</span>
+          </div>
+          <svg width={Wv} height={Hv} style={{ display: "block" }}>
+            <rect x="0" y="0" width={Wv} height={Hv} fill="#F7F8FA" />
+            <line x1={mxv} y1={cyv} x2={Wv - mxv} y2={cyv} stroke="#C8CFD6" strokeDasharray="4 3" />
+            {parts}
+            <text x={SXv(0)} y={SYv(Rh) - 4} fontSize="9" fill="#5C6B7A" textAnchor="middle">하우징 Ø{data.Dh.toFixed(0)} · 길이 {data.Lh.toFixed(0)}mm</text>
+            <text x={SXv(0)} y={cyv + 3} fontSize="8" fill="#5C6B7A" textAnchor="middle">샤프트</text>
+            {[["하우징", data.T[3]], ["철심", data.T[2]], ["엔드와인딩", data.T[1]], ["자석", data.T[4]]].map(([l, T], i) => (
+              <g key={i}><rect x={Wv - 96} y={10 + i * 14} width={10} height={10} fill={tc(T)} stroke="#0003" />
+                <text x={Wv - 82} y={19 + i * 14} fontSize="8" fill="#333">{l} {T.toFixed(0)}°</text></g>
+            ))}
+          </svg>
+          <div className="px-2 pb-1 text-xs" style={{ color: "#8893A0" }}>파랑 {Tmn.toFixed(0)}° → 적색 {Tmx.toFixed(0)}° · 하우징 외경/길이를 바꾸면 단면이 변합니다.</div>
+        </div>
         <Plot title="포화온도 예측 (온도–시간)" sub={"정상상태 " + data.Tss.toFixed(1) + "°C · 시정수 τ " + (data.tau / 60).toFixed(1) + "분 · ≈" + (5 * data.tau / 60).toFixed(0) + "분 후 포화"}
           h={300} series={[
             { x: data.tmin, y: data.temp, color: "#B02020", label: "Coil Temp [°C] vs 분" },
