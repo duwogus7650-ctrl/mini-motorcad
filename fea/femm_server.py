@@ -53,54 +53,85 @@ def label(x, y, mat, magdir=0, group=0):
     femm.mi_clearselected()
 
 
+def rotpt(p, a):
+    c, s = math.cos(a), math.sin(a)
+    return (p[0] * c - p[1] * s, p[0] * s + p[1] * c)
+
+
 def build(d):
-    """형상·재질 구성 (1회). 회전자=group 1."""
+    """형상·재질 구성 (1회). 회전자=group 1.
+    슬리버 방지: 보어/로터 완전원을 그리지 않고, 슬롯 사이는 치 페이스 아크,
+    자석 사이는 폴갭 아크로 경계를 이어 깨끗한 영역을 만든다."""
     Ns, poles = d['Ns'], d['poles']
     Rlam, Rb, Rro, Rmi, Rsh = d['Rlam'], d['Rb'], d['Rro'], d['Rmi'], d['Rsh']
+    sp, mp = d['slotPoly'], d['magnetPoly']
+    sROT, rROT = d['statorRot'] * D2R, d['rotorRot'] * D2R
+    slotDepth = d['slotDepth']
+    Rd = Rb + slotDepth
     murMag = 1.05
     Hc = d['Br'] / (MU0 * murMag)
 
-    femm.openfemm(1)            # 1 = 창 숨김
-    femm.newdocument(0)         # 0 = magnetics
+    femm.openfemm(1)
+    femm.newdocument(0)
     femm.mi_probdef(0, 'millimeters', 'planar', 1e-8, d['depth'], 30)
     femm.mi_getmaterial('Air')
     femm.mi_getmaterial('M-19 Steel')
     femm.mi_addmaterial('PM', murMag, murMag, Hc, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)
-
-    for R in (Rlam, Rb, Rro, Rmi, Rsh):
-        arc(R)
-    for i in range(Ns):
-        seg(rot(d['slotPoly'], d['statorRot'] * D2R + i * 2 * math.pi / Ns))
-    for k in range(poles):
-        seg(rot(d['magnetPoly'], d['rotorRot'] * D2R + k * 2 * math.pi / poles))
-
-    # 슬롯 코일 재질 (정전류밀도, 처음엔 0 → 위치마다 갱신)
     for i in range(Ns):
         femm.mi_addmaterial('Coil%d' % i, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)
 
-    # 블록 라벨
-    label(0, (Rb + d['slotDepth'] + Rlam) / 2, 'M-19 Steel', 0, 0)   # 스테이터 백아이언
-    label((Rro + Rb) / 2, 0, 'Air', 0, 0)                           # 에어갭
-    label((Rsh + Rmi) / 2, 0.001, 'M-19 Steel', 0, 1)              # 로터 철심
-    label(Rsh / 2, 0.001, 'Air', 0, 1)                             # 샤프트(비자성)
+    # 간섭 없는 완전 원: 스테이터 OD, 샤프트
+    arc(Rlam)
+    arc(Rsh)
+
+    # 슬롯 폴리곤 + 치 페이스 아크(보어 Rb) — 보어 완전원 생략
     for i in range(Ns):
-        a = d['statorRot'] * D2R + i * 2 * math.pi / Ns
-        rr = Rb + 0.45 * d['slotDepth']
+        seg(rot(sp, sROT + i * 2 * math.pi / Ns))
+    A1, A1m = sp[0], sp[-1]                         # 개구 상/하단 (반경 = Rb)
+    deltaDeg = math.degrees(math.atan2(A1[1], A1[0]))
+    slotPitch = 360.0 / Ns
+    for i in range(Ns):
+        up = rotpt(A1, sROT + i * 2 * math.pi / Ns)
+        lo = rotpt(A1m, sROT + (i + 1) * 2 * math.pi / Ns)
+        femm.mi_addarc(up[0], up[1], lo[0], lo[1], slotPitch - 2 * deltaDeg, 2.5)
+
+    # 자석 폴리곤 + 폴갭 아크(Rmi) — 로터 완전원 생략
+    for k in range(poles):
+        seg(rot(mp, rROT + k * 2 * math.pi / poles))
+    mLo, mHi = mp[0], mp[20]                        # 자석 내부 아크 끝점 (반경 = Rmi)
+    magHalfDeg = math.degrees(math.atan2(mHi[1], mHi[0]))
+    polePitch = 360.0 / poles
+    for k in range(poles):
+        hi = rotpt(mHi, rROT + k * 2 * math.pi / poles)
+        lo = rotpt(mLo, rROT + (k + 1) * 2 * math.pi / poles)
+        femm.mi_addarc(hi[0], hi[1], lo[0], lo[1], polePitch - 2 * magHalfDeg, 2.5)
+
+    # 블록 라벨
+    aT = math.pi / Ns                              # 치 중앙
+    label((Rb + Rd) / 2 * math.cos(aT), (Rb + Rd) / 2 * math.sin(aT), 'M-19 Steel', 0, 0)
+    aG = rROT + math.pi / poles                    # 폴 갭
+    rG = (Rro + 3 * Rb) / 4                         # 에어갭 라벨(보어쪽 → group1 제외)
+    label(rG * math.cos(aG), rG * math.sin(aG), 'Air', 0, 0)
+    rR = (Rsh + Rmi) / 2
+    label(rR * math.cos(rROT), rR * math.sin(rROT), 'M-19 Steel', 0, 1)   # 로터 철심
+    label(Rsh / 2, 0.001, 'Air', 0, 1)                                    # 샤프트(비자성)
+    for i in range(Ns):
+        a = sROT + i * 2 * math.pi / Ns
+        rr = Rb + 0.45 * slotDepth
         label(rr * math.cos(a), rr * math.sin(a), 'Coil%d' % i, 0, 0)
     for k in range(poles):
-        a = d['rotorRot'] * D2R + k * 2 * math.pi / poles
-        rr = (Rro + Rmi) / 2
-        magdir = a / D2R + (180 if k % 2 else 0)
+        a = rROT + k * 2 * math.pi / poles
+        rr = (Rmi + Rro) / 2
+        magdir = math.degrees(a) + (180 if k % 2 else 0)
         femm.mi_addblocklabel(rr * math.cos(a), rr * math.sin(a))
         femm.mi_selectlabel(rr * math.cos(a), rr * math.sin(a))
         femm.mi_setblockprop('PM', 1, 0, '<None>', magdir, 1, 0)
         femm.mi_clearselected()
 
-    # 회전자 전체를 group 1로 (에어갭 중간 반경 안쪽 모두 선택)
+    # 회전자 전체를 group 1로 (에어갭 중간 반경 안쪽)
     femm.mi_selectcircle(0, 0, (Rro + Rb) / 2, 4)
     femm.mi_setgroup(1)
     femm.mi_clearselected()
-
     femm.mi_makeABC(7, Rlam * 1.25, 0, 0, 0)
     femm.mi_zoomnatural()
     femm.mi_saveas('mini_motorcad.fem')
