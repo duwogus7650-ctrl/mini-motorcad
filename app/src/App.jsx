@@ -69,7 +69,8 @@ function parseDxf(text) {
         else if (c === 11) x2 = num(v); else if (c === 21) y2 = num(v);
         i++;
       }
-      shapes.push({ type: "poly", pts: [[x1, y1], [x2, y2]], closed: false });
+      if ([x1, y1, x2, y2].every(Number.isFinite))      // 끝점 누락 시 NaN 형상 방지
+        shapes.push({ type: "poly", pts: [[x1, y1], [x2, y2]], closed: false });
     } else if (val === "CIRCLE" || val === "ARC") {
       let cx, cy, r, a1 = 0, a2 = 360; const isArc = val === "ARC"; i++;
       while (i < pairs.length && pairs[i][0] !== 0) {
@@ -147,8 +148,11 @@ function extractGeometry(shapes) {
   const closed = [];       // 닫힌 폴리라인 점배열
   const allPts = [];
   for (const s of shapes) {
-    if (s.type === "circle") circles.push({ cx: s.cx, cy: s.cy, r: s.r });
-    else if (s.type === "arc") circles.push({ cx: s.cx, cy: s.cy, r: s.r });
+    if (s.type === "circle") circles.push({ cx: s.cx, cy: s.cy, r: s.r, full: true });
+    else if (s.type === "arc") {                         // 호는 큰 각도(>270°)만 동심원 후보로
+      const sp = (((s.a2 - s.a1) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      circles.push({ cx: s.cx, cy: s.cy, r: s.r, full: sp > 4.712 });
+    }
     else if (s.type === "poly" && s.pts && s.pts.length) {
       s.pts.forEach((p) => { if (isFinite(p[0]) && isFinite(p[1])) allPts.push(p); });
       if (s.closed && s.pts.length >= 3) closed.push(s.pts);
@@ -156,7 +160,7 @@ function extractGeometry(shapes) {
   }
   // 중심: 원 중심들의 중앙값(견고), 없으면 점 바운딩박스 중심
   let cx, cy;
-  const med = (arr) => { const a = arr.slice().sort((p, q) => p - q); return a[Math.floor(a.length / 2)]; };
+  const med = (arr) => { const a = arr.slice().sort((p, q) => p - q); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
   if (circles.length) { cx = med(circles.map((c) => c.cx)); cy = med(circles.map((c) => c.cy)); }
   else if (allPts.length) {
     const xs = allPts.map((p) => p[0]), ys = allPts.map((p) => p[1]);
@@ -169,7 +173,7 @@ function extractGeometry(shapes) {
   if (maxR <= 0) return null;
   const unit = maxR < 5 ? 1000 : 1;                  // 5 미만이면 m로 보고 mm 변환
   // 동심원(중심 근처) → 지름 목록(병합)
-  const conc = circles.filter((c) => R(c.cx, c.cy) < 0.03 * maxR);
+  const conc = circles.filter((c) => c.full && R(c.cx, c.cy) < 0.03 * maxR);
   let dias = [...new Set(conc.map((c) => +(2 * c.r * unit).toFixed(2)))].sort((a, b) => b - a);
   const merged = [];
   dias.forEach((d) => { if (!merged.some((m) => Math.abs(m - d) < 0.3)) merged.push(d); });
@@ -242,8 +246,10 @@ function shapesToDxf(shapes, T) {
     if (sh.type === "circle") { const [x, y] = tf(sh.cx, sh.cy); L.push("0", "CIRCLE", "8", "0", "10", f(x), "20", f(y), "30", "0", "40", f(sh.r * T.scale)); }
     else if (sh.type === "arc") { const [x, y] = tf(sh.cx, sh.cy); L.push("0", "ARC", "8", "0", "10", f(x), "20", f(y), "30", "0", "40", f(sh.r * T.scale), "50", f(sh.a1 / D2R + T.rot), "51", f(sh.a2 / D2R + T.rot)); }
     else if (sh.type === "poly" && sh.pts && sh.pts.length) {
-      L.push("0", "LWPOLYLINE", "8", "0", "90", String(sh.pts.length), "70", sh.closed ? "1" : "0");
-      sh.pts.forEach(([px, py]) => { const [x, y] = tf(px, py); L.push("10", f(x), "20", f(y)); });
+      const pts = sh.pts.filter(([px, py]) => Number.isFinite(px) && Number.isFinite(py));  // 비유한 점 제외
+      if (pts.length < 2) continue;
+      L.push("0", "LWPOLYLINE", "8", "0", "90", String(pts.length), "70", sh.closed ? "1" : "0");
+      pts.forEach(([px, py]) => { const [x, y] = tf(px, py); L.push("10", f(x), "20", f(y)); });
     }
   }
   L.push("0", "ENDSEC", "0", "EOF");
@@ -331,12 +337,15 @@ function windingAnalysis(Ns, poles, throw_, Nc) {
   const theta = Array.from({ length: Ns }, (_, i) => ((i * pp * 360) / Ns) % 360);
   const coils = []; // {go, ret, phase 0/1/2, sign}
   const beltMap = { 0: [0, 1], 3: [0, -1], 2: [1, 1], 5: [1, -1], 4: [2, 1], 1: [2, -1] };
+  let invalid = false;
   for (let i = 0; i < Ns; i++) {
-    const g = theta[i] * D2R, r = theta[(i + throw_) % Ns] * D2R;
+    const ret = (i + throw_) % Ns;
+    const g = theta[i] * D2R, r = theta[ret] * D2R;
     const re = Math.cos(g) - Math.cos(r), im = Math.sin(g) - Math.sin(r);
+    if (Math.hypot(re, im) < 1e-9) invalid = true;        // go==ret(EMF 위상 동일) → 권선 무효
     const axis = ((Math.atan2(im, re) / D2R) % 360 + 360) % 360;
-    const [ph, sg] = beltMap[Math.floor(axis / 60)];
-    coils.push({ go: i, ret: (i + throw_) % Ns, phase: ph, sign: sg });
+    const [ph, sg] = beltMap[Math.floor((axis + 1e-6) / 60) % 6];  // 60° 경계 부동소수 가드
+    coils.push({ go: i, ret, phase: ph, sign: sg });
   }
   // 슬롯별 상 도체수 테이블 (±Nc)
   const table = Array.from({ length: Ns }, () => [0, 0, 0]);
@@ -356,8 +365,10 @@ function windingAnalysis(Ns, poles, throw_, Nc) {
     });
     return n ? Math.hypot(re, im) / (2 * n) : 0;
   };
-  const coilsPerPhase = coils.filter((c) => c.phase === 0).length;
-  return { coils, table, kw, coilsPerPhase, theta };
+  const cpp = [0, 1, 2].map((p) => coils.filter((c) => c.phase === p).length);
+  const balanced = !invalid && cpp[0] === cpp[1] && cpp[1] === cpp[2];
+  const coilsPerPhase = cpp[0];
+  return { coils, table, kw, coilsPerPhase, coilsPerPhaseAll: cpp, balanced, theta };
 }
 
 // ─── 재질 DB ─────────────────────────────────────────────────────
@@ -500,7 +511,7 @@ function compute(G, W, M, C, cal) {
   const BtAnalytic = C.cT * Bgpk * taus / G.toothWidth;
   const byDepth = G.statorLamDia / 2 - Bore / 2 - G.slotDepth;
   out.byDepth = byDepth;
-  const ByAnalytic = BtAnalytic * G.toothWidth / (2 * byDepth);
+  const ByAnalytic = BtAnalytic * G.toothWidth / (2 * Math.max(byDepth, 0.1));   // 백아이언 깊이≤0 가드
   out.Bt = (cal && Number.isFinite(cal.Bt)) ? cal.Bt : BtAnalytic;
   out.By = (cal && Number.isFinite(cal.By)) ? cal.By : ByAnalytic;
 
@@ -515,8 +526,10 @@ function compute(G, W, M, C, cal) {
   out.mStator = out.mTooth + out.mBy;
   const RoM = (Bore - 2 * g) / 2 - G.bandingThickness, RiM = RoM - lm;
   out.mRotor = Math.PI * (RiM ** 2 - (G.shaftDia / 2) ** 2) * G.rotorLamLength * rhoFe;
-  const halfA = (G.magnetArcED / pp / 2) * D2R;
-  out.mMagnet = poles * (RoM ** 2 - RiM ** 2) * halfA * G.magnetLength * rhoMag;
+  // 자석 질량 — 실제 그려지는 빵덩어리(면취) 단면적(shoelace)으로 계산해 형상과 일치.
+  // magnetReduction(면취량)이 형상·질량 양쪽에 일관 반영됨. (REF 0.1428 은 MC 자석모델 차이)
+  const magArea = Math.abs(shoelace(buildMagnetPath(G)));   // mm² (1극 자석 단면)
+  out.mMagnet = poles * magArea * G.magnetLength * rhoMag;
   out.mCopper = out.turnCSA * 1e-6 * (out.MLT * 1e-3 * NphTotal) * 3 * 8933;
   out.mActive = out.mStator + out.mRotor + out.mMagnet + out.mCopper;
 
@@ -2237,7 +2250,9 @@ function GraphsTab({ res, calc, solved }) {
           bestPcu = Pcu;
           // 손실 속도 외삽(정격 기준, fr=1·n=정격에서 불변): 에디 고주파 완화 pE=1.8, 기타손실 속도비례 pO=1
           const fr = feRatio(n);
-          const Pfe = res.PfeHyst * fr + res.PfeEddy * Math.pow(fr, 1.8);
+          // 약계자(id<0) 시 d축 자속 = λ+Ld·id 감소 → 철심 자속↓ → 철손↓ (자속비²). id=0서 1.
+          const fluxR = lamF > 0 ? Math.max(0, (lamF + LdF * id) / lamF) : 1;
+          const Pfe = (res.PfeHyst * fr + res.PfeEddy * Math.pow(fr, 1.8)) * fluxR * fluxR;
           const other = calc.otherLoss * (n / nRated);
           const Pem = Tt * wm, Pout = Pem - Pfe - other, Pin = Pem + Pcu;
           bestEff = Pout > 0 && Pin > 0 ? (Pout / Pin) * 100 : 0;       // 손실>출력이면 0 (빈칸 대신 최저색)
@@ -2355,7 +2370,10 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
     const hot = Math.max(T[0], T[1]);
     const Pcu = res.Pcu * rhoRatio(Twavg) * (res.RacRdc || 1), Qtot = Pcu + res.Pfe + calc.otherLoss;
     // 온도-시간 포화곡선 (핫스팟 기준)
-    const Cth = res.mCopper * 385 + res.mStator * 460, tau = Cth * (Ryoke + Rconv);
+    // 시정수는 정상상태와 일관된 등가 열저항(권선→주위) 사용: Req=(hot−Ta)/Qtot.
+    const Cth = res.mCopper * 385 + res.mStator * 460;
+    const Req = Qtot > 0 ? (hot - Ta) / Qtot : (Ryoke + Rconv);
+    const tau = Cth * Req;
     const Tss = hot, NPT = 60, tMax = tau * 5, tmin = [], temp = [];
     for (let i = 0; i <= NPT; i++) { const t = (tMax * i) / NPT; tmin.push(t / 60); temp.push(Ta + (Tss - Ta) * (1 - Math.exp(-t / tau))); }
     return { T, hot, Qtot, Rslot, Rcuax, Rendair, Ryoke, Rconv, Rgap, Ahouse, Dh: Dh * 1e3, Lh: Lh * 1e3, Cth, tau, Tss, tmin, temp };
@@ -2569,8 +2587,9 @@ function WindingLayout({ geo, res }) {
           })}
         </svg>
       </div>
-      <div className="flex items-center gap-4 px-3 py-1 text-xs" style={{ background: "#1A222C", color: "#22304d", fontFamily: "Consolas,monospace" }}>
+      <div className="flex items-center gap-4 px-3 py-1 text-xs" style={{ background: "#0c1424", color: "#9fb2d4", fontFamily: "JetBrains Mono,Consolas,monospace", borderTop: "1px solid #22304d" }}>
         <span>{Ns}슬롯 / {poles}극 · 3상 2층 Lap · Throw {wa.coils.length ? Math.abs(wa.coils[0].ret - wa.coils[0].go) || 1 : 1}</span>
+        {wa.balanced === false && <span style={{ color: "#f5a524", fontWeight: 600 }}>⚠ 3상 불균형 권선 (상당 코일 {wa.coilsPerPhaseAll.join("/")}) — throw/슬롯·극수 확인</span>}
         <div className="flex-1" />
         <span>코일 {wa.coils.length}개 (상당 {wa.coilsPerPhase}) · kw1 {res.kw1.toFixed(4)}</span>
       </div>

@@ -181,11 +181,13 @@ def build(d):
 
 
 def set_currents(d, ia, ib, ic):
-    """슬롯별 정전류밀도 갱신 (J [MA/m²]). table[slot][phase] 부호 턴수 사용."""
+    """슬롯별 정전류밀도 갱신 (J [MA/m²]). table[slot][phase] 부호 턴수 사용.
+    병렬회로수 P>1: 도체당 전류 = 상전류/P 이므로 실 ampere-turns 도 /P."""
     slotA = d['slotArea'] * 1e-6
+    P = max(1, int(d.get('parallelPaths', 1)))
     for i in range(d['Ns']):
         t = d['slotTurns'][i]
-        netAT = t[0] * ia + t[1] * ib + t[2] * ic
+        netAT = (t[0] * ia + t[1] * ib + t[2] * ic) / P
         J = netAT / slotA / 1e6
         femm.mi_modifymaterial('Coil%d' % i, 4, J)   # propnum 4 = J
 
