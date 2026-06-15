@@ -446,23 +446,6 @@ function compute(G, W, M, C, cal) {
   out.Erms = out.Epk / Math.SQRT2;
   out.Ke = pp * lam;
   out.pp = pp;
-  // ini_pos: U상 무부하 역기전력 zero-cross가 0°에서 "상승(rising)"으로 시작하는 회전자 위치.
-  // U상 자기축 전기각 ψ0=arg(Σ turns_U·e^{j·pp·φ}), φ=슬롯각. λ_U∝sin(ψ0−ppδ).
-  // EMF 상승 영점(Maxwell 규약)은 쇄교자속 최소(−peak) 쪽 → ppδ=ψ0+90°. (자속최대=하강 영점)
-  {
-    let reS = 0, imS = 0;
-    for (let i = 0; i < Ns; i++) {
-      const phi = (G.statorRot + (i * 360) / Ns) * D2R;
-      reS += wa.table[i][0] * Math.cos(pp * phi);
-      imS += wa.table[i][0] * Math.sin(pp * phi);
-    }
-    const psi0 = Math.atan2(imS, reS);                       // U상 자기축 전기각 [rad]
-    const periodMech = 360 / pp;                             // 전기 1주기 = 기계각 360/pp
-    let mech = ((psi0 + Math.PI / 2) / pp) / D2R;            // 상승 영점 기계각 [deg]
-    mech = ((mech % periodMech) + periodMech) % periodMech;  // [0, 360/pp) 정규화
-    out.iniPos = mech;                                       // 회전자 기계각 [deg]
-    out.iniPosE = ((mech * pp) % 360 + 360) % 360;           // 전기각 [deg]
-  }
   const Iph = W.connection === "delta" ? C.IlineRms / Math.sqrt(3) : C.IlineRms;
   out.IphRms = Iph; out.IlineRms = C.IlineRms;
   const IphPk = Iph * Math.SQRT2;
@@ -582,6 +565,31 @@ function compute(G, W, M, C, cal) {
   const LdAnalytic = (Lm + Lslot) * 1e3, LqAnalytic = LdAnalytic * 1.09; // SPM: Lq 약간 큼(슬롯/포화)
   out.Ld = (cal && Number.isFinite(cal.Ld) && cal.Ld > 0) ? cal.Ld : LdAnalytic;  // FEMM 보정 시 FEA 인덕턴스
   out.Lq = (cal && Number.isFinite(cal.Lq) && cal.Lq > 0) ? cal.Lq : LqAnalytic;
+
+  // ── ini_pos: 부하 시 역기전력(전기자반작용 포함) zero-cross 상승점이 0°가 되는 회전자 위치 ──
+  // 무부하 기준: U상 자기축 ψ0=arg(Σ turns_U·e^{j·pp·φ}); 상승영점 ppδ=ψ0+90°.
+  // 부하 시: 총 쇄교자속 λ_s=(λd,λq)=(λ_PM+Ld·id, Lq·iq) 가 d축 대비 부하각 δL=atan2(λq,λd) 만큼
+  //          회전 → 부하 역기전력도 δL 만큼 앞섬 → 상승영점 회전자위치가 δL/pp 만큼 당겨짐.
+  {
+    let reS = 0, imS = 0;
+    for (let i = 0; i < Ns; i++) {
+      const phi = (G.statorRot + (i * 360) / Ns) * D2R;
+      reS += wa.table[i][0] * Math.cos(pp * phi);
+      imS += wa.table[i][0] * Math.sin(pp * phi);
+    }
+    const psi0 = Math.atan2(imS, reS);
+    const advR = C.phaseAdv * D2R;
+    const idL = -IphPk * Math.sin(advR), iqL = IphPk * Math.cos(advR);
+    const lamD = lam + out.Ld * 1e-3 * idL, lamQ = out.Lq * 1e-3 * iqL;
+    const dL = Math.atan2(lamQ, lamD);                        // 부하각(전기) [rad]
+    out.loadAngle = dL / D2R;                                 // 부하각 [elec deg]
+    const per = 360 / pp;
+    const nl = (((psi0 + Math.PI / 2) / pp / D2R) % per + per) % per;   // 무부하 상승영점 [mech deg]
+    out.iniPosNL = nl;
+    let ld = ((psi0 + Math.PI / 2 - dL) / pp / D2R % per + per) % per;  // 부하 상승영점 [mech deg]
+    out.iniPos = ld;                                          // 부하 기준 ini_pos [mech deg]
+    out.iniPosE = ((ld * pp) % 360 + 360) % 360;             // 전기각 [deg]
+  }
 
   // 파생량 (Motor-CAD Output Data 항목)
   out.Km = out.Pcu > 0 ? out.torque / Math.sqrt(out.Pcu) : 0;
@@ -1985,10 +1993,12 @@ function OutputTab({ res, calc, showRef, solved }) {
             {r("Cogging Frequency", f(res.coggingFreq, 0), "Hz", 7680)}
             {r("Magnetic Symmetry (LCM)", f(360 / res.coggingPeriod, 0), "")}
             {r("kw1 (기본파 권선계수)", f(res.kw1, 5), "", 0.94521)}
-            {r("ini_pos (U상 EMF 0점, 기계)", f(res.iniPos, 2), "°mech")}
-            {r("ini_pos (전기각)", f(res.iniPosE, 1), "°elec")}
+            {r("ini_pos (부하시, 기계)", f(res.iniPos, 2), "°mech", undefined, true)}
+            {r("ini_pos (부하시, 전기)", f(res.iniPosE, 1), "°elec")}
+            {r("ini_pos (무부하 기준)", f(res.iniPosNL, 2), "°mech")}
+            {r("부하각 δL (전기자반작용)", f(res.loadAngle, 1), "°elec")}
           </Tbl>
-          <div className="w-full text-xs px-1" style={{ color: "#7e8eac" }}>ini_pos = U상 무부하 역기전력이 0(상승)에서 시작하는 회전자 위치 = U상 쇄교자속 최대(d축↔U상축 정렬). 전기 1주기(360/pp = {f(360 / res.pp, 1)}°mech)마다 반복.</div>
+          <div className="w-full text-xs px-1" style={{ color: "#7e8eac" }}>ini_pos = U상 <b>부하시 역기전력</b>(전기자반작용 포함)이 0(상승)에서 시작하는 회전자 위치. 무부하 상승영점에서 부하각 δL/pp 만큼 이동(현재 운전점 전류·진각 기준). 전기 1주기(360/pp={f(360 / res.pp, 1)}°mech)마다 반복.</div>
         </>)}
         {sub === "flux" && (
           <Tbl>
