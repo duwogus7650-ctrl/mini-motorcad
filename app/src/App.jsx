@@ -446,6 +446,23 @@ function compute(G, W, M, C, cal) {
   out.Erms = out.Epk / Math.SQRT2;
   out.Ke = pp * lam;
   out.pp = pp;
+  // ini_pos: U상 무부하 역기전력 zero-cross(상승, 시작점)=0° 가 되는 회전자 위치.
+  // = U상 쇄교자속 최대 = 회전자 d축(자석 N극)이 U상 자기축에 정렬되는 기계각.
+  // U상 자기축 전기각 ψ0=arg(Σ turns_U·e^{j·pp·φ}), φ=슬롯각. λ_U∝sin(ψ0−ppδ) 최대 → ppδ=ψ0−90°.
+  {
+    let reS = 0, imS = 0;
+    for (let i = 0; i < Ns; i++) {
+      const phi = (G.statorRot + (i * 360) / Ns) * D2R;
+      reS += wa.table[i][0] * Math.cos(pp * phi);
+      imS += wa.table[i][0] * Math.sin(pp * phi);
+    }
+    const psi0 = Math.atan2(imS, reS);                       // U상 자기축 전기각 [rad]
+    const periodMech = 360 / pp;                             // 전기 1주기 = 기계각 360/pp
+    let mech = ((psi0 - Math.PI / 2) / pp) / D2R;            // d축 정렬 기계각 [deg]
+    mech = ((mech % periodMech) + periodMech) % periodMech;  // [0, 360/pp) 정규화
+    out.iniPos = mech;                                       // 회전자 기계각 [deg]
+    out.iniPosE = ((mech * pp) % 360 + 360) % 360;           // 전기각 [deg]
+  }
   const Iph = W.connection === "delta" ? C.IlineRms / Math.sqrt(3) : C.IlineRms;
   out.IphRms = Iph; out.IlineRms = C.IlineRms;
   const IphPk = Iph * Math.SQRT2;
@@ -1968,7 +1985,10 @@ function OutputTab({ res, calc, showRef, solved }) {
             {r("Cogging Frequency", f(res.coggingFreq, 0), "Hz", 7680)}
             {r("Magnetic Symmetry (LCM)", f(360 / res.coggingPeriod, 0), "")}
             {r("kw1 (기본파 권선계수)", f(res.kw1, 5), "", 0.94521)}
+            {r("ini_pos (U상 EMF 0점, 기계)", f(res.iniPos, 2), "°mech")}
+            {r("ini_pos (전기각)", f(res.iniPosE, 1), "°elec")}
           </Tbl>
+          <div className="w-full text-xs px-1" style={{ color: "#7e8eac" }}>ini_pos = U상 무부하 역기전력이 0(상승)에서 시작하는 회전자 위치 = U상 쇄교자속 최대(d축↔U상축 정렬). 전기 1주기(360/pp = {f(360 / res.pp, 1)}°mech)마다 반복.</div>
         </>)}
         {sub === "flux" && (
           <Tbl>
