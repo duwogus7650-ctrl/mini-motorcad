@@ -446,9 +446,9 @@ function compute(G, W, M, C, cal) {
   out.Erms = out.Epk / Math.SQRT2;
   out.Ke = pp * lam;
   out.pp = pp;
-  // ini_pos: U상 무부하 역기전력 zero-cross(상승, 시작점)=0° 가 되는 회전자 위치.
-  // = U상 쇄교자속 최대 = 회전자 d축(자석 N극)이 U상 자기축에 정렬되는 기계각.
-  // U상 자기축 전기각 ψ0=arg(Σ turns_U·e^{j·pp·φ}), φ=슬롯각. λ_U∝sin(ψ0−ppδ) 최대 → ppδ=ψ0−90°.
+  // ini_pos: U상 무부하 역기전력 zero-cross가 0°에서 "상승(rising)"으로 시작하는 회전자 위치.
+  // U상 자기축 전기각 ψ0=arg(Σ turns_U·e^{j·pp·φ}), φ=슬롯각. λ_U∝sin(ψ0−ppδ).
+  // EMF 상승 영점(Maxwell 규약)은 쇄교자속 최소(−peak) 쪽 → ppδ=ψ0+90°. (자속최대=하강 영점)
   {
     let reS = 0, imS = 0;
     for (let i = 0; i < Ns; i++) {
@@ -458,7 +458,7 @@ function compute(G, W, M, C, cal) {
     }
     const psi0 = Math.atan2(imS, reS);                       // U상 자기축 전기각 [rad]
     const periodMech = 360 / pp;                             // 전기 1주기 = 기계각 360/pp
-    let mech = ((psi0 - Math.PI / 2) / pp) / D2R;            // d축 정렬 기계각 [deg]
+    let mech = ((psi0 + Math.PI / 2) / pp) / D2R;            // 상승 영점 기계각 [deg]
     mech = ((mech % periodMech) + periodMech) % periodMech;  // [0, 360/pp) 정규화
     out.iniPos = mech;                                       // 회전자 기계각 [deg]
     out.iniPosE = ((mech * pp) % 360 + 360) % 360;           // 전기각 [deg]
