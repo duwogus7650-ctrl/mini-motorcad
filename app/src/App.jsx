@@ -1137,10 +1137,11 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
       pts.forEach(([x, y], i) => { const [sx, sy] = w2s(x, y, V); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
       if (close) ctx.closePath();
     };
-    const circle = (r) => { const [sx, sy] = w2s(0, 0, V); ctx.beginPath(); ctx.arc(sx, sy, r * V.scale, 0, Math.PI * 2); };
+    const cr = (r) => Math.max(r * V.scale, 0);   // 음수 반경 가드 (ctx.arc 음수=예외)
+    const circle = (r) => { const [sx, sy] = w2s(0, 0, V); ctx.beginPath(); ctx.arc(sx, sy, cr(r), 0, Math.PI * 2); };
     const annulus = (rO, rI) => {
       const [sx, sy] = w2s(0, 0, V);
-      ctx.beginPath(); ctx.arc(sx, sy, rO * V.scale, 0, Math.PI * 2); ctx.arc(sx, sy, rI * V.scale, 0, Math.PI * 2, true);
+      ctx.beginPath(); ctx.arc(sx, sy, cr(rO), 0, Math.PI * 2); ctx.arc(sx, sy, cr(rI), 0, Math.PI * 2, true);
     };
 
     ctx.globalAlpha = opacity;
@@ -1240,12 +1241,38 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
       const ex = extractGeometry(shapes);
       if (ex) setDxfT({ scale: ex.unit, rot: 0, dx: -ex.unit * ex.cx, dy: -ex.unit * ex.cy });
       else setDxfT({ scale: 1, rot: 0, dx: 0, dy: 0 });
-      if (autoPendingRef.current) { autoPendingRef.current = false; runExtract(shapes); }
+      if (autoPendingRef.current) { const m = autoPendingRef.current; autoPendingRef.current = false; m === "fit" ? runFit(shapes) : runExtract(shapes); }
     } catch (err) { alert("DXF 파싱 실패: " + err.message); }
   };
   const autoExtract = () => {
-    if (!dxf) { autoPendingRef.current = true; fileRef.current?.click(); return; } // 없으면 파일 선택 → 로드 후 자동추출
+    if (!dxf) { autoPendingRef.current = "extract"; fileRef.current?.click(); return; } // 없으면 파일 선택 → 로드 후 자동추출
     runExtract(dxf);
+  };
+  const autoFit = () => {
+    if (!dxf) { autoPendingRef.current = "fit"; fileRef.current?.click(); return; }   // 없으면 파일 선택 → 로드 후 자동맞춤
+    runFit(dxf);
+  };
+  // 형상 자동 맞춤: 치수 추출 + 중심/스케일/회전 정렬 (DXF 오버레이가 파라메트릭 모델에 겹치게)
+  const runFit = (shapes) => {
+    const ex = extractGeometry(shapes);
+    if (!ex) { alert("형상을 추출할 수 없습니다 (원/닫힌 폴리라인 없음)."); return; }
+    const applied = [];
+    const put = (k, v, lo, hi, dec = 2) => { if (isFinite(v) && v > lo && v < hi) { sG(k, +v.toFixed(dec)); applied.push(k); } };
+    put("statorLamDia", ex.statorLamDia, 5, 2000);
+    put("statorBore", ex.statorBore, 2, ex.statorLamDia);
+    put("shaftDia", ex.shaftDia, 1, ex.statorBore || 1e9);
+    if (ex.slotCount >= 3 && ex.slotCount <= 90) { sG("slotNumber", ex.slotCount); applied.push("slotNumber"); }
+    if (ex.poleCount >= 2 && ex.poleCount <= 80) { sG("poleNumber", ex.poleCount); applied.push("poleNumber"); }
+    // 정렬: 모델 슬롯(statorRot=0)에 DXF 슬롯을 맞춤. 변환 후 DXF 피처는 world각=θ_raw+rot 이므로 rot=−statorRot.
+    sG("statorRot", 0);
+    const polePitch = 360 / (ex.poleCount || geo.poleNumber || 2);
+    const rrot = (((ex.rotorRot - ex.statorRot) % polePitch) + polePitch) % polePitch;
+    sG("rotorRot", +rrot.toFixed(1));
+    const rot = -ex.statorRot, rr = rot * D2R, sc = ex.unit;
+    setDxfT({ scale: sc, rot,
+      dx: -sc * (ex.cx * Math.cos(rr) - ex.cy * Math.sin(rr)),
+      dy: -sc * (ex.cx * Math.sin(rr) + ex.cy * Math.cos(rr)) });
+    setAutoInfo({ ...ex, applied: [...applied, "정렬(중심·스케일·회전)"] });
   };
   const runExtract = (shapes) => {
     const ex = extractGeometry(shapes);
@@ -1307,9 +1334,13 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
             className="text-xs px-2 py-1 rounded" style={{ border: "1px solid #22304d", background: "#101a30", color: "#7e8eac" }}>
             ⟲ 기준형상 리셋 (1250W)
           </button>
+          <button onClick={autoFit} className="text-xs px-2 py-1.5 rounded font-semibold"
+            style={{ background: `linear-gradient(180deg,${UI.cyan},#1f9fb5)`, color: "#06222a", cursor: "pointer" }}>
+            ⊹ 형상 자동 맞춤 (추출+중심·회전 정렬){!dxf && " · DXF 선택"}
+          </button>
           <button onClick={autoExtract} className="text-xs px-2 py-1.5 rounded text-white font-medium"
             style={{ background: "#1B7A2B", cursor: "pointer" }}>
-            ⚙ 형상 추출 (치수·슬롯/극수){!dxf && " · DXF 선택"}
+            ⚙ 형상 추출만 (치수, 정렬 X){!dxf && " · DXF 선택"}
           </button>
           {dxf && (
             <button onClick={exportAlignedDxf} className="text-xs px-2 py-1 rounded font-medium"
@@ -1319,10 +1350,14 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
           )}
           {autoInfo && (
             <div className="text-xs rounded p-2 mt-0.5" style={{ background: "#0c1424", border: "1px solid #22304d", fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
-              <div className="font-bold mb-0.5" style={{ color: "#1B7A2B" }}>추출 결과 (단위 ×{autoInfo.unit})</div>
+              {(() => { const fit = autoInfo.applied.some((a) => a.includes("정렬")); return (<>
+              <div className="font-bold mb-0.5" style={{ color: fit ? UI.cyan : "#1B7A2B" }}>{fit ? "자동 맞춤 완료 (단위 ×" : "추출 결과 (단위 ×"}{autoInfo.unit})</div>
               <div>OD {autoInfo.statorLamDia} · 보어 {autoInfo.statorBore} · 샤프트 {autoInfo.shaftDia || "—"}</div>
               <div>슬롯 {autoInfo.slotCount || "?"} · 극 {autoInfo.poleCount || "?"}</div>
-              <div style={{ color: "#B5622D" }}>에어갭(추정) {autoInfo.airgap || "?"} · 회전(추정) S{autoInfo.statorRot}°/R{autoInfo.rotorRot}° — 미적용, 직접 입력/정렬</div>
+              {fit
+                ? <div style={{ color: UI.cyan }}>정렬 적용 ✓ 중심·스케일·회전(S{autoInfo.statorRot}°→0) · 자석 rotorRot {(((autoInfo.rotorRot - autoInfo.statorRot) % (360 / (autoInfo.poleCount || 2)) + (360 / (autoInfo.poleCount || 2))) % (360 / (autoInfo.poleCount || 2))).toFixed(1)}° · 에어갭(추정) {autoInfo.airgap || "?"}</div>
+                : <div style={{ color: "#B5622D" }}>에어갭(추정) {autoInfo.airgap || "?"} · 회전(추정) S{autoInfo.statorRot}°/R{autoInfo.rotorRot}° — 미적용, 직접 입력/정렬</div>}
+              </>); })()}
               <div style={{ color: "#7e8eac" }}>동심원 Ø: {autoInfo.dias.join(", ") || "없음"}</div>
               <div style={{ color: "#7e8eac" }}>폴리 외측 {autoInfo.outerN}→슬롯 {autoInfo.slotCount} · 내측 {autoInfo.innerN}→극 {autoInfo.poleCount} · 폴리보어 {autoInfo.borePoly || "—"}</div>
               <div style={{ color: "#7e8eac", marginTop: 2 }}>적용 {autoInfo.applied.length}개 — 오버레이 확인 후 미세조정</div>

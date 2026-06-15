@@ -73,6 +73,11 @@ FEMM 보정은 **레퍼런스 없는 새 모터**에 유용.
 
 ## 4. 기타
 
+- **DXF 형상 자동 맞춤**: 불러온 DXF를 파라메트릭 모델에 겹치도록 **중심·스케일·회전**까지 자동 정렬
+  (`runFit`). 슬롯 무게중심각으로 `statorRot` 추정→`rot=−statorRot`, 중심을 원점으로 이동, m↔mm 단위 적용,
+  자석은 `rotorRot=wrap(ex.rotorRot−ex.statorRot, 극피치)`로 맞춤. 기존 "형상 추출만"(치수 적용·정렬 X)과 별도 버튼.
+  검증: `tools/verify_autofit.mjs` — 알려진 중심·단위·회전의 합성 18s/16p 모터에 실제 추출+변환 적용 →
+  **중심오차 0, 슬롯·자석 각도잔차 5.7e-14°(기계정밀도)**, 슬롯반경·OD/보어/샤프트·슬롯/극수 전부 정확.
 - **CSV 추출**: `motor_spec.csv`(사양표) · `tn_curve.csv`(T-N), UTF-8 BOM(Excel 호환).
 - **다크 컨트롤패널 UI**: 네이비+시안, 브래킷코너 패널(14px 라운드+그라데이션), 테크니컬 폰트, 캔버스 다크화.
 - **완전 오프라인**: Tailwind·폰트 CDN→로컬 번들(PostCSS + @fontsource). 인터넷 없이 구동(최초 npm install만 온라인).
