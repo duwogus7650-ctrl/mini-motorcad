@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Component, useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ════════════════════════════════════════════════════════════════
 //  Mini Motor-CAD — PMSM 기초설계 도구
@@ -46,6 +46,40 @@ const Panel = ({ title, accent = UI.cyan, children, style, bodyClass = "" }) => 
     ))}
   </div>
 );
+
+// 렌더 예외 안전망 — 입력값이 극단/퇴화되면 화면이 통째로 꺼지지 않게 복구 UI 표시.
+class ErrorBoundary extends Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidUpdate(prev) { if (prev.resetKey !== this.props.resetKey && this.state.err) this.setState({ err: null }); }
+  render() {
+    if (this.state.err) {
+      return (
+        <div className="p-6" style={{ color: UI.text }}>
+          <div className="rounded p-4" style={{ background: "rgba(255,93,108,0.1)", border: `1px solid ${UI.red}66`, maxWidth: 560 }}>
+            <div style={{ color: UI.red, fontWeight: 700, fontSize: 15, marginBottom: 6 }}>⚠ 표시 오류 — 입력값이 형상을 깨뜨렸습니다</div>
+            <div className="text-xs" style={{ color: UI.label, marginBottom: 10, lineHeight: 1.6 }}>
+              방금 바꾼 값(예: 로터 외경·자석 두께·에어갭)이 형상을 퇴화시켜 렌더가 멈췄습니다.
+              아래로 복구하세요. 데이터는 보존됩니다.
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => { this.props.onReset && this.props.onReset(); }}
+                className="text-xs px-3 py-1.5 rounded font-semibold" style={{ background: `linear-gradient(180deg,${UI.blue},#2456c8)`, color: "#fff" }}>
+                ⟲ 기준형상(1250W)으로 되돌리기
+              </button>
+              <button onClick={() => location.reload()}
+                className="text-xs px-3 py-1.5 rounded" style={{ border: `1px solid ${UI.border}`, color: UI.text, background: UI.inset }}>
+                페이지 새로고침
+              </button>
+            </div>
+            <div className="text-xs mt-3" style={{ color: UI.faint, fontFamily: UI.mono }}>{String(this.state.err && this.state.err.message || this.state.err).slice(0, 200)}</div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ─── DXF 파서 ────────────────────────────────────────────────────
 function parseDxf(text) {
@@ -1038,14 +1072,17 @@ export default function MiniMotorCad() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden">
-        {tab === "geometry" && <GeometryTab geo={geo} sG={sG} res={res} resetGeo={() => setGeo(GEO0)} />}
-        {tab === "winding" && <WindingTab geo={geo} wind={wind} sW={sW} res={res} showRef={showRef} />}
-        {tab === "materials" && <MaterialsTab mat={mat} sM={sM} res={res} showRef={showRef} />}
-        {tab === "calculation" && <CalculationTab geo={geo} calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} femmCal={femmCal} setFemmCal={setFemmCal} />}
-        {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} solved={solved} />}
-        {tab === "graphs" && <GraphsTab res={res} calc={calc} solved={solved} />}
-        {tab === "thermal" && <ThermalTab geo={geo} wind={wind} calc={calc} res={res} therm={therm} sT={sT} solved={solved} />}
-        {tab === "selfcheck" && <SelfCheckTab res={res} calc={calc} wind={wind} femmCal={femmCal} solved={solved} />}
+        <ErrorBoundary resetKey={JSON.stringify([geo, wind, mat, calc, therm, tab])}
+          onReset={() => { setGeo(GEO0); setWind(WIND0); setMat(MAT0); setCalc(CALC0); setTherm(THERM0); setFemmCal(null); }}>
+          {tab === "geometry" && <GeometryTab geo={geo} sG={sG} res={res} resetGeo={() => setGeo(GEO0)} />}
+          {tab === "winding" && <WindingTab geo={geo} wind={wind} sW={sW} res={res} showRef={showRef} />}
+          {tab === "materials" && <MaterialsTab mat={mat} sM={sM} res={res} showRef={showRef} />}
+          {tab === "calculation" && <CalculationTab geo={geo} calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} femmCal={femmCal} setFemmCal={setFemmCal} />}
+          {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} solved={solved} />}
+          {tab === "graphs" && <GraphsTab res={res} calc={calc} solved={solved} />}
+          {tab === "thermal" && <ThermalTab geo={geo} wind={wind} calc={calc} res={res} therm={therm} sT={sT} solved={solved} />}
+          {tab === "selfcheck" && <SelfCheckTab res={res} calc={calc} wind={wind} femmCal={femmCal} solved={solved} />}
+        </ErrorBoundary>
       </div>
     </div>
   );
