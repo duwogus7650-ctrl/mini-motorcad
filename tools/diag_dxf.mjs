@@ -86,10 +86,11 @@ function extractGeometry(shapes) {
   const conc = circles.filter((c) => c.full && R(c.cx, c.cy) < 0.03 * maxR);
   let dias = [...new Set(conc.map((c) => +(2 * c.r * unit).toFixed(2)))].sort((a, b) => b - a);
   const merged = []; dias.forEach((d) => { if (!merged.some((m) => Math.abs(m - d) < 0.3)) merged.push(d); }); dias = merged;
+  const angSpanOf = (pts, gx, gy) => { const cang = Math.atan2(gy - cy, gx - cx); let lo = 0, hi = 0; pts.forEach((p) => { let d = Math.atan2(p[1] - cy, p[0] - cx) - cang; d = Math.atan2(Math.sin(d), Math.cos(d)); if (d < lo) lo = d; if (d > hi) hi = d; }); return (hi - lo) / D2R; };
   const polyInfo = closed.map((pts) => {
     let sx = 0, sy = 0; pts.forEach((p) => { sx += p[0]; sy += p[1]; });
     const gx = sx / pts.length, gy = sy / pts.length;
-    return { rc: R(gx, gy) * unit, rin: Math.min(...pts.map((p) => R(p[0], p[1]))) * unit, rout: Math.max(...pts.map((p) => R(p[0], p[1]))) * unit, ang: Math.atan2(gy - cy, gx - cx) / D2R };
+    return { rc: R(gx, gy) * unit, rin: Math.min(...pts.map((p) => R(p[0], p[1]))) * unit, rout: Math.max(...pts.map((p) => R(p[0], p[1]))) * unit, ang: Math.atan2(gy - cy, gx - cx) / D2R, span: angSpanOf(pts, gx, gy) };
   }).filter((p) => p.rc > 0.02 * maxR * unit && p.rc > 0.6 * p.rin);
   const countClusters = (angs) => {
     const n = angs.length; if (n <= 2) return n;
@@ -102,7 +103,8 @@ function extractGeometry(shapes) {
   };
   const wrap = (a, p) => a - p * Math.round(a / p);
   const meanRot = (arr, p) => arr.reduce((s, a) => s + wrap(a, p), 0) / arr.length;
-  let slotCount = 0, poleCount = 0, rotorOD = 0, airgap = 0, statorRot = 0, rotorRot = 0, borePoly = 0, outerN = 0, innerN = 0;
+  const median = (arr) => { if (!arr.length) return 0; const a = arr.slice().sort((p, q) => p - q); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+  let slotCount = 0, poleCount = 0, rotorOD = 0, airgap = 0, statorRot = 0, rotorRot = 0, borePoly = 0, outerN = 0, innerN = 0, slotRout = 0, slotSpan = 0, magThk = 0, magSpan = 0;
   if (polyInfo.length) {
     const rcs = polyInfo.map((p) => p.rc).sort((a, b) => a - b);
     let gi = -1, gv = 0;
@@ -110,8 +112,8 @@ function extractGeometry(shapes) {
     const thr = gi > 0 && gv > 0.8 ? (rcs[gi - 1] + rcs[gi]) / 2 : -Infinity;
     const outer = polyInfo.filter((p) => p.rc >= thr), inner = polyInfo.filter((p) => p.rc < thr);
     outerN = outer.length; innerN = inner.length;
-    if (outer.length) { slotCount = countClusters(outer.map((p) => p.ang)); borePoly = 2 * Math.min(...outer.map((p) => p.rin)); statorRot = meanRot(outer.map((p) => p.ang), 360 / slotCount); }
-    if (inner.length) { poleCount = countClusters(inner.map((p) => p.ang)); rotorOD = 2 * Math.max(...inner.map((p) => p.rout)); rotorRot = meanRot(inner.map((p) => p.ang), 360 / poleCount); }
+    if (outer.length) { slotCount = countClusters(outer.map((p) => p.ang)); borePoly = 2 * Math.min(...outer.map((p) => p.rin)); statorRot = meanRot(outer.map((p) => p.ang), 360 / slotCount); slotRout = median(outer.map((p) => p.rout)); slotSpan = median(outer.map((p) => p.span)); }
+    if (inner.length) { poleCount = countClusters(inner.map((p) => p.ang)); rotorOD = 2 * Math.max(...inner.map((p) => p.rout)); rotorRot = meanRot(inner.map((p) => p.ang), 360 / poleCount); magThk = median(inner.map((p) => p.rout - p.rin)); magSpan = median(inner.map((p) => p.span)); }
   }
   const statorLamDia = dias.length ? +Math.max(dias[0], 2 * maxR * unit).toFixed(2) : +(2 * maxR * unit).toFixed(2);
   const innerDias = dias.filter((d) => d < 0.985 * statorLamDia);
@@ -121,7 +123,18 @@ function extractGeometry(shapes) {
   let shaftDia = 0;
   if (statorBore) { const sc = innerDias.filter((d) => d < 0.92 * statorBore); if (sc.length) shaftDia = sc[sc.length - 1]; }
   if (statorBore && rotorOD) airgap = (statorBore - rotorOD) / 2;
-  return { cx, cy, unit, dias, statorLamDia, statorBore: +statorBore.toFixed(2), shaftDia: +shaftDia.toFixed(2), slotCount, poleCount, rotorOD: +rotorOD.toFixed(2), airgap: +airgap.toFixed(2), statorRot: +statorRot.toFixed(1), rotorRot: +rotorRot.toFixed(1), outerN, innerN, borePoly: +borePoly.toFixed(2), maxR };
+  const Rb = statorBore / 2, Ro = statorLamDia / 2;
+  let slotDepth = slotRout > Rb ? slotRout - Rb : 0;
+  if (slotDepth > 0) slotDepth = Math.min(slotDepth, (Ro - Rb) - 0.8);
+  let toothWidth = 0;
+  if (slotCount > 0 && slotDepth > 0 && slotSpan > 0) {
+    const coilsPerPitch = Math.max(1, Math.round(outerN / slotCount));
+    const copperFrac = Math.min(0.85, Math.max(0.2, (coilsPerPitch * slotSpan) / (360 / slotCount)));
+    const Rmid = Rb + slotDepth / 2;
+    toothWidth = (2 * Math.PI * Rmid / slotCount) * (1 - copperFrac);
+  }
+  const magnetArcED = (magSpan > 0 && poleCount >= 2) ? Math.min(180, magSpan * poleCount / 2) : 0;
+  return { cx, cy, unit, dias, statorLamDia, statorBore: +statorBore.toFixed(2), shaftDia: +shaftDia.toFixed(2), slotCount, poleCount, rotorOD: +rotorOD.toFixed(2), airgap: +airgap.toFixed(2), statorRot: +statorRot.toFixed(1), rotorRot: +rotorRot.toFixed(1), outerN, innerN, borePoly: +borePoly.toFixed(2), maxR, slotDepth: +slotDepth.toFixed(2), toothWidth: +toothWidth.toFixed(2), magnetThickness: +magThk.toFixed(2), magnetArcED: +magnetArcED.toFixed(0) };
 }
 
 const text = readFileSync(path, "latin1");
@@ -135,6 +148,9 @@ console.log("\n── 추출 ─────────────────
 console.log(`center=(${ex.cx.toFixed(3)}, ${ex.cy.toFixed(3)})  maxR(raw)=${ex.maxR.toFixed(3)}  → unit=${ex.unit}`);
 console.log(`OD=${ex.statorLamDia}  bore=${ex.statorBore}  shaft=${ex.shaftDia}  rotorOD=${ex.rotorOD}  airgap=${ex.airgap}`);
 console.log(`slot=${ex.slotCount}(외측폴리 ${ex.outerN})  pole=${ex.poleCount}(내측폴리 ${ex.innerN})`);
+console.log(`slotDepth=${ex.slotDepth}  toothWidth=${ex.toothWidth}  magnetThickness=${ex.magnetThickness}  magnetArcED=${ex.magnetArcED}°E`);
+const byDepth = ex.statorLamDia / 2 - ex.statorBore / 2 - ex.slotDepth;
+console.log(`백아이언 byDepth=${byDepth.toFixed(2)}mm  ${byDepth > 0 ? "✓(모델 일관)" : "❌(오버플로!)"}`);
 console.log(`statorRot=${ex.statorRot}  rotorRot=${ex.rotorRot}  borePoly=${ex.borePoly}`);
 console.log(`동심원 Ø: ${ex.dias.join(", ") || "없음"}`);
 // 자동맞춤 변환
@@ -159,4 +175,21 @@ if (process.argv.includes("-v")) {
   info.forEach((p) => { const b = Math.round(p.rc / 2) * 2; band[b] = (band[b] || 0) + 1; });
   console.log("rc밴드(2mm): " + Object.entries(band).map(([k, v]) => `${k}:${v}`).join("  "));
   info.forEach((p) => console.log(`  rc=${String(p.rc).padStart(6)}  rin=${String(p.rin).padStart(6)}  rout=${String(p.rout).padStart(6)}  nv=${String(p.nv).padStart(3)}  ang=${String(p.ang).padStart(7)}`));
+
+  // 밴드별 각폭 분석 (자석호각·톱니폭 추출용)
+  const angSpan = (pts) => { // 중심각 기준 점들의 각폭(deg)
+    const cang = Math.atan2(pts.reduce((s, p) => s + (p[1] - cy), 0), pts.reduce((s, p) => s + (p[0] - cx), 0));
+    let lo = 0, hi = 0;
+    pts.forEach((p) => { let d = Math.atan2(p[1] - cy, p[0] - cx) - cang; d = Math.atan2(Math.sin(d), Math.cos(d)); lo = Math.min(lo, d); hi = Math.max(hi, d); });
+    return (hi - lo) / D2R;
+  };
+  const withSpan = closed.map((s) => {
+    let sx = 0, sy = 0; s.pts.forEach((p) => { sx += p[0]; sy += p[1]; });
+    return { rc: R(sx / s.pts.length, sy / s.pts.length), span: angSpan(s.pts), pts: s.pts };
+  }).filter((p) => p.rc > 0.02 * ex.maxR && p.rc > 0.6 * Math.min(...p.pts.map((q) => R(q[0], q[1]))));
+  const innerB = withSpan.filter((p) => p.rc < ex.statorBore / 2).map((p) => +p.span.toFixed(1)).sort((a, b) => a - b);
+  const outerB = withSpan.filter((p) => p.rc >= ex.statorBore / 2).map((p) => +p.span.toFixed(1)).sort((a, b) => a - b);
+  const medn = (a) => a.length ? a[a.length >> 1] : 0;
+  console.log(`\n자석(내측) 각폭 중앙값=${medn(innerB)}°  → magnetArcED≈${(medn(innerB) * ex.poleCount / 2).toFixed(0)}°E`);
+  console.log(`슬롯(외측) 각폭 중앙값=${medn(outerB)}°  (슬롯피치 ${(360 / ex.slotCount).toFixed(1)}°)`);
 }

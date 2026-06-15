@@ -212,12 +212,18 @@ function extractGeometry(shapes) {
   const merged = [];
   dias.forEach((d) => { if (!merged.some((m) => Math.abs(m - d) < 0.3)) merged.push(d); });
   dias = merged;
-  // 닫힌 폴리 → 무게중심반경·내/외반경·중심각
+  // 닫힌 폴리 → 무게중심반경·내/외반경·중심각·각폭
+  const angSpanOf = (pts, gx, gy) => {            // 무게중심각 기준 점들의 각폭(deg)
+    const cang = Math.atan2(gy - cy, gx - cx); let lo = 0, hi = 0;
+    pts.forEach((p) => { let d = Math.atan2(p[1] - cy, p[0] - cx) - cang; d = Math.atan2(Math.sin(d), Math.cos(d)); if (d < lo) lo = d; if (d > hi) hi = d; });
+    return (hi - lo) / D2R;
+  };
   const polyInfo = closed.map((pts) => {
     let sx = 0, sy = 0; pts.forEach((p) => { sx += p[0]; sy += p[1]; });
     const gx = sx / pts.length, gy = sy / pts.length;
     return { rc: R(gx, gy) * unit, rin: Math.min(...pts.map((p) => R(p[0], p[1]))) * unit,
-      rout: Math.max(...pts.map((p) => R(p[0], p[1]))) * unit, ang: Math.atan2(gy - cy, gx - cx) / D2R };
+      rout: Math.max(...pts.map((p) => R(p[0], p[1]))) * unit, ang: Math.atan2(gy - cy, gx - cx) / D2R,
+      span: angSpanOf(pts, gx, gy) };
   }).filter((p) => p.rc > 0.02 * maxR * unit && p.rc > 0.6 * p.rin);
   // 잡음 제외 + 축을 감싸는 프레임 윤곽선(적층 외곽선·링: 무게중심이 중심으로 끌려 rc≪rin) 제외.
   // 실제 슬롯/자석 피처는 rin<rc<rout 이라 무게중심이 피처 반경에 있음.
@@ -236,8 +242,9 @@ function extractGeometry(shapes) {
   };
   const wrap = (a, p) => a - p * Math.round(a / p);
   const meanRot = (arr, p) => arr.reduce((s, a) => s + wrap(a, p), 0) / arr.length;
+  const median = (arr) => { if (!arr.length) return 0; const a = arr.slice().sort((p, q) => p - q); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
   let slotCount = 0, poleCount = 0, rotorOD = 0, airgap = 0, statorRot = 0, rotorRot = 0;
-  let borePoly = 0, outerN = 0, innerN = 0;
+  let borePoly = 0, outerN = 0, innerN = 0, slotRout = 0, slotSpan = 0, magThk = 0, magSpan = 0;
   if (polyInfo.length) {
     const rcs = polyInfo.map((p) => p.rc).sort((a, b) => a - b);
     let gi = -1, gv = 0;
@@ -250,11 +257,15 @@ function extractGeometry(shapes) {
       slotCount = countClusters(outer.map((p) => p.ang));
       borePoly = 2 * Math.min(...outer.map((p) => p.rin));
       statorRot = meanRot(outer.map((p) => p.ang), 360 / slotCount);
+      slotRout = median(outer.map((p) => p.rout));        // 슬롯 바닥 반경(mm)
+      slotSpan = median(outer.map((p) => p.span));        // 슬롯 폴리 각폭(deg)
     }
     if (inner.length) {
       poleCount = countClusters(inner.map((p) => p.ang));
       rotorOD = 2 * Math.max(...inner.map((p) => p.rout));
       rotorRot = meanRot(inner.map((p) => p.ang), 360 / poleCount);
+      magThk = median(inner.map((p) => p.rout - p.rin));  // 자석 두께(mm)
+      magSpan = median(inner.map((p) => p.span));         // 자석 각폭(deg, 기계)
     }
   }
   // 지름 배정: OD(최대) / 보어(동심원 우선) / 샤프트(보어의 0.7배 미만 소형원)
@@ -266,10 +277,27 @@ function extractGeometry(shapes) {
   let shaftDia = 0;
   if (statorBore) { const sc = innerDias.filter((d) => d < 0.92 * statorBore); if (sc.length) shaftDia = sc[sc.length - 1]; }
   if (statorBore && rotorOD) airgap = (statorBore - rotorOD) / 2;
+  // ── 종속 치수 추출 (모델 일관성용) ──
+  const Rb = statorBore / 2, Ro = statorLamDia / 2;
+  // 슬롯깊이: 슬롯 바닥반경 − 보어반경. 백아이언 ≥0.8mm 남도록 클램프.
+  let slotDepth = slotRout > Rb ? slotRout - Rb : 0;
+  if (slotDepth > 0) slotDepth = Math.min(slotDepth, (Ro - Rb) - 0.8);
+  // 톱니폭: mid반경 슬롯피치호 × (1 − 동(copper)점유율). 점유율 = (피치당 코일폴리수 × 코일각폭)/피치.
+  let toothWidth = 0;
+  if (slotCount > 0 && slotDepth > 0 && slotSpan > 0) {
+    const coilsPerPitch = Math.max(1, Math.round(outerN / slotCount));
+    const copperFrac = Math.min(0.85, Math.max(0.2, (coilsPerPitch * slotSpan) / (360 / slotCount)));
+    const Rmid = Rb + slotDepth / 2;
+    toothWidth = (2 * Math.PI * Rmid / slotCount) * (1 - copperFrac);
+  }
+  // 자석호각(전기): 자석 기계각폭 × 극쌍수. 자석두께: 자석 밴드 두께.
+  const magnetArcED = (magSpan > 0 && poleCount >= 2) ? Math.min(180, magSpan * poleCount / 2) : 0;
   return { cx, cy, unit, dias, statorLamDia, statorBore: +statorBore.toFixed(2),
     shaftDia: +shaftDia.toFixed(2), slotCount, poleCount, rotorOD: +rotorOD.toFixed(2),
     airgap: +airgap.toFixed(2), statorRot: +statorRot.toFixed(1), rotorRot: +rotorRot.toFixed(1),
-    outerN, innerN, borePoly: +borePoly.toFixed(2) };
+    outerN, innerN, borePoly: +borePoly.toFixed(2),
+    slotDepth: +slotDepth.toFixed(2), toothWidth: +toothWidth.toFixed(2),
+    magnetThickness: +magThk.toFixed(2), magnetArcED: +magnetArcED.toFixed(0) };
 }
 
 // 변환(중심·회전·단위 적용)된 형상을 DXF 텍스트로 출력. T={scale,rot(deg),dx,dy}
@@ -1262,9 +1290,17 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
     const put = (k, v, lo, hi, dec = 2) => { if (isFinite(v) && v > lo && v < hi) { sG(k, +v.toFixed(dec)); applied.push(k); } };
     put("statorLamDia", ex.statorLamDia, 5, 2000);
     put("statorBore", ex.statorBore, 2, ex.statorLamDia);
-    put("shaftDia", ex.shaftDia, 1, ex.statorBore || 1e9);
+    // 샤프트: DXF에 원 있으면 적용(로터보다 작아야). 미검출인데 잔존값이 로터≥ 면 0(솔리드 로터)으로 — 로터 환형 뒤집힘 방지.
+    if (ex.shaftDia > 1 && ex.shaftDia < ex.rotorOD) { sG("shaftDia", ex.shaftDia); applied.push("shaftDia"); }
+    else if (ex.rotorOD > 0 && geo.shaftDia >= 0.98 * ex.rotorOD) { sG("shaftDia", 0); applied.push("shaftDia→0(미검출)"); }
     if (ex.slotCount >= 3 && ex.slotCount <= 90) { sG("slotNumber", ex.slotCount); applied.push("slotNumber"); }
     if (ex.poleCount >= 2 && ex.poleCount <= 80) { sG("poleNumber", ex.poleCount); applied.push("poleNumber"); }
+    // 종속 치수(슬롯깊이·톱니폭·자석두께·자석호각·에어갭) — OD/보어와 일관되게(모델 오버플로 방지)
+    put("slotDepth", ex.slotDepth, 0.3, (ex.statorLamDia - ex.statorBore) / 2);
+    put("toothWidth", ex.toothWidth, 0.2, 100);
+    put("magnetThickness", ex.magnetThickness, 0.2, 100);
+    if (ex.magnetArcED >= 60 && ex.magnetArcED <= 180) { sG("magnetArcED", ex.magnetArcED); applied.push("magnetArcED"); }
+    put("airgap", ex.airgap, 0.05, 5);
     // 정렬: 모델 슬롯(statorRot=0)에 DXF 슬롯을 맞춤. 변환 후 DXF 피처는 world각=θ_raw+rot 이므로 rot=−statorRot.
     sG("statorRot", 0);
     const polePitch = 360 / (ex.poleCount || geo.poleNumber || 2);
@@ -1356,6 +1392,7 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
               <div className="font-bold mb-0.5" style={{ color: fit ? UI.cyan : "#1B7A2B" }}>{fit ? "자동 맞춤 완료 (단위 ×" : "추출 결과 (단위 ×"}{autoInfo.unit})</div>
               <div>OD {autoInfo.statorLamDia} · 보어 {autoInfo.statorBore} · 샤프트 {autoInfo.shaftDia || "—"}</div>
               <div>슬롯 {autoInfo.slotCount || "?"} · 극 {autoInfo.poleCount || "?"}</div>
+              {fit && <div style={{ color: UI.text }}>슬롯깊이 {autoInfo.slotDepth} · 톱니폭 {autoInfo.toothWidth} · 자석두께 {autoInfo.magnetThickness} · 자석호 {autoInfo.magnetArcED}°E</div>}
               {fit
                 ? <div style={{ color: UI.cyan }}>정렬 적용 ✓ 중심·스케일·회전(S{autoInfo.statorRot}°→0) · 자석 rotorRot {(((autoInfo.rotorRot - autoInfo.statorRot) % (360 / (autoInfo.poleCount || 2)) + (360 / (autoInfo.poleCount || 2))) % (360 / (autoInfo.poleCount || 2))).toFixed(1)}° · 에어갭(추정) {autoInfo.airgap || "?"}</div>
                 : <div style={{ color: "#B5622D" }}>에어갭(추정) {autoInfo.airgap || "?"} · 회전(추정) S{autoInfo.statorRot}°/R{autoInfo.rotorRot}° — 미적용, 직접 입력/정렬</div>}
