@@ -218,7 +218,9 @@ function extractGeometry(shapes) {
     const gx = sx / pts.length, gy = sy / pts.length;
     return { rc: R(gx, gy) * unit, rin: Math.min(...pts.map((p) => R(p[0], p[1]))) * unit,
       rout: Math.max(...pts.map((p) => R(p[0], p[1]))) * unit, ang: Math.atan2(gy - cy, gx - cx) / D2R };
-  }).filter((p) => p.rc > 0.02 * maxR * unit);       // 중심부 잡음 제외
+  }).filter((p) => p.rc > 0.02 * maxR * unit && p.rc > 0.6 * p.rin);
+  // 잡음 제외 + 축을 감싸는 프레임 윤곽선(적층 외곽선·링: 무게중심이 중심으로 끌려 rc≪rin) 제외.
+  // 실제 슬롯/자석 피처는 rin<rc<rout 이라 무게중심이 피처 반경에 있음.
   // 무게중심반경 최대 갭으로 슬롯(외)·자석(내) 분리
   // 각도 클러스터 수: 정렬한 각도 간격을 내림차순 정렬해 '큰 간격→작은 간격' 비율 점프로
   // 클러스터 경계 개수를 센다 (슬롯당 폴리 2개여도 한 슬롯으로 병합, 균등배치면 전부 개별).
