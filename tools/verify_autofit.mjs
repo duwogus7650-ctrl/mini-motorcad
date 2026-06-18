@@ -50,8 +50,14 @@ function extractGeometry(shapes) {
     for (let i = 0; i < desc.length - 1; i++) { if (desc[i + 1] < 1e-6) continue; const r = desc[i] / desc[i + 1]; if (r > bestR) { bestR = r; cut = i; } }
     return bestR > 1.4 && cut + 1 >= 2 ? cut + 1 : n;
   };
-  const wrap = (a, p) => a - p * Math.round(a / p);
-  const meanRot = (arr, p) => arr.reduce((s, a) => s + wrap(a, p), 0) / arr.length;
+  const meanRot = (arr, p) => {
+    if (!arr.length) return 0;
+    const n = 360 / p;
+    let S = 0, C = 0;
+    for (const a of arr) { S += Math.sin(n * a * D2R); C += Math.cos(n * a * D2R); }
+    if (Math.abs(S) < 1e-12 && Math.abs(C) < 1e-12) return 0;
+    return Math.atan2(S, C) / D2R / n;
+  };
   let slotCount = 0, poleCount = 0, rotorOD = 0, airgap = 0, statorRot = 0, rotorRot = 0;
   let borePoly = 0, outerN = 0, innerN = 0;
   if (polyInfo.length) {
@@ -163,10 +169,35 @@ console.log(`슬롯 최대 각도잔차 : ${slotMaxRes.toExponential(2)}°  (모
 console.log(`슬롯 평균 반경     : ${slotRmm.toFixed(3)} mm  [참값 ${(RSLOT * 1000).toFixed(1)}]`);
 console.log(`자석 최대 각도잔차 : ${magMaxRes.toExponential(2)}°  (모델 극선과의 편차)`);
 
-const ok =
+const ok1 =
   Math.abs(ex.cx - Cx) < 1e-9 && Math.abs(ex.cy - Cy) < 1e-9 &&
   ex.unit === 1000 && ex.slotCount === NS && ex.poleCount === NP &&
   centerErr < 1e-6 && slotMaxRes < 0.06 && magMaxRes < 0.06 &&
   Math.abs(slotRmm - RSLOT * 1000) < 0.05;
-console.log(`\n결과: ${ok ? "✅ 통과 — DXF 슬롯·자석이 모델 위치에 정확히 정렬됨" : "❌ 실패"}`);
+console.log(`\n결과(시나리오1, offset 6.5°): ${ok1 ? "✅ 통과" : "❌ 실패"}`);
+
+// ── 회귀 시나리오 2: 톱니가 축 위(슬롯 오프셋 ≈ ±피치/2 경계) + 측정노이즈 ──
+// 예전 산술평균 meanRot은 +half/−half가 상쇄돼 statorRot≈0(회전 미적용)으로 무너졌다.
+// 원형평균은 ±half로 정확히 복원해야 한다.
+function boundaryCase(offDeg, noiseDeg) {
+  const sh = [
+    { type: "circle", cx: Cx, cy: Cy, r: ROD },
+    { type: "circle", cx: Cx, cy: Cy, r: RBORE },
+    { type: "circle", cx: Cx, cy: Cy, r: RSHAFT },
+  ];
+  for (let k = 0; k < NS; k++) sh.push(quad(RSLOT, null, offDeg + k * (360 / NS) + noiseDeg * Math.sin(k * 1.7), 0.004, 0.10));
+  for (let k = 0; k < NP; k++) sh.push(quad(RMAG, null, offDeg + k * (360 / NP) + noiseDeg * Math.cos(k * 2.3), 0.0018, 0.18));
+  return extractGeometry(sh);
+}
+const half = 360 / NS / 2;                       // 10°
+const resTo = (a, p) => { let v = ((a % p) + p) % p; if (v > p / 2) v -= p; return v; };
+const eb = boundaryCase(10, 1.5);                // 톱니가 축 위 + ±1.5° 노이즈
+const recovered = Math.abs(resTo(eb.statorRot - 10, 360 / NS)) < 0.5;  // 10°(=−10° mod 20)로 복원
+console.log("\n── 회귀 검증(경계 오프셋 10°+노이즈) ─────");
+console.log(`statorRot 추출=${eb.statorRot}°  (참 ±10°, |잔차|<0.5° 요구)  slot=${eb.slotCount} pole=${eb.poleCount}`);
+const ok2 = recovered && eb.slotCount === NS && eb.poleCount === NP;
+console.log(`결과(시나리오2, 경계 회전): ${ok2 ? "✅ 통과 — 회전 정확 복원" : "❌ 실패 — 회전 무너짐"}`);
+
+const ok = ok1 && ok2;
+console.log(`\n전체: ${ok ? "✅ 통과" : "❌ 실패"}`);
 process.exit(ok ? 0 : 1);

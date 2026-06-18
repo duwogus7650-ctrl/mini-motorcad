@@ -240,8 +240,16 @@ function extractGeometry(shapes) {
     for (let i = 0; i < desc.length - 1; i++) { if (desc[i + 1] < 1e-6) continue; const r = desc[i] / desc[i + 1]; if (r > bestR) { bestR = r; cut = i; } }
     return bestR > 1.4 && cut + 1 >= 2 ? cut + 1 : n;
   };
-  const wrap = (a, p) => a - p * Math.round(a / p);
-  const meanRot = (arr, p) => arr.reduce((s, a) => s + wrap(a, p), 0) / arr.length;
+  // 회전 오프셋(피치 ±절반 내 잔차): n중 대칭의 원형평균.
+  // 산술평균은 잔차가 ±피치/2 경계에 걸치면(톱니/극이 축 위 등) +half와 −half가 상쇄돼 0으로 무너진다.
+  const meanRot = (arr, p) => {
+    if (!arr.length) return 0;
+    const n = 360 / p;                                  // 대칭 차수(슬롯/극수)
+    let S = 0, C = 0;
+    for (const a of arr) { S += Math.sin(n * a * D2R); C += Math.cos(n * a * D2R); }
+    if (Math.abs(S) < 1e-12 && Math.abs(C) < 1e-12) return 0;
+    return Math.atan2(S, C) / D2R / n;                  // (−p/2, p/2]
+  };
   const median = (arr) => { if (!arr.length) return 0; const a = arr.slice().sort((p, q) => p - q); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
   let slotCount = 0, poleCount = 0, rotorOD = 0, airgap = 0, statorRot = 0, rotorRot = 0;
   let borePoly = 0, outerN = 0, innerN = 0, slotRout = 0, slotSpan = 0, magThk = 0, magSpan = 0;
@@ -320,6 +328,125 @@ function shapesToDxf(shapes, T) {
   return L.join("\n");
 }
 
+// ─── Ansys Maxwell .aedt 설계변수 임포트 ─────────────────────────────
+// .aedt의 VariableProp 블록을 파싱하고 수식(단위 mm/deg·변수참조·함수)을 평가해
+// 모델 파라미터로 매핑. DXF 외곽선 추출의 추측을 건너뛰고 설계 원본값을 정확히 적용.
+function parseAedt(text) {
+  const D2Rl = Math.PI / 180;
+  const vars = {}, lc = {};
+  const re = /VariableProp\(\s*'([^']+)'\s*,\s*'[^']*'\s*,\s*'[^']*'\s*,\s*'([^']*)'/g;
+  let m; while ((m = re.exec(text))) { vars[m[1]] = m[2]; lc[m[1].toLowerCase()] = m[1]; }
+  if (!Object.keys(vars).length) return null;
+  const FUNCS = { sin: (x) => Math.sin(x * D2Rl), cos: (x) => Math.cos(x * D2Rl), tan: (x) => Math.tan(x * D2Rl),
+    asin: (x) => Math.asin(x) / D2Rl, acos: (x) => Math.acos(x) / D2Rl, atan: (x) => Math.atan(x) / D2Rl, sqrt: Math.sqrt, abs: Math.abs };
+  const UNIT = { mm: 1, cm: 10, m: 1000, um: 0.001, deg: 1, rad: 180 / Math.PI, rpm: 1, a: 1, v: 1, ohm: 1, hz: 1, s: 1, ms: 0.001 };
+  const evalVar = (name, seen) => {
+    const key = lc[name.toLowerCase()]; if (!key) throw new Error("미정의 " + name);
+    if (seen.has(key)) throw new Error("순환참조 " + key);
+    const ns = new Set(seen); ns.add(key);
+    return parseExpr(vars[key], ns);
+  };
+  function parseExpr(src, seen) {
+    let i = 0; const s = src;
+    const ws = () => { while (i < s.length && /\s/.test(s[i])) i++; };
+    function atom() {
+      ws();
+      if (s[i] === "(") { i++; const v = expr(); ws(); if (s[i] === ")") i++; return v; }
+      if (s[i] === "-") { i++; return -atom(); }
+      if (s[i] === "+") { i++; return atom(); }
+      const id = /^[A-Za-z_][A-Za-z0-9_]*/.exec(s.slice(i));
+      if (id) {
+        const w = id[0]; i += w.length; ws();
+        if (s[i] === "(") { i++; const a = expr(); ws(); if (s[i] === ")") i++; const fn = FUNCS[w.toLowerCase()]; if (!fn) throw new Error("미지원함수 " + w); return fn(a); }
+        if (w.toUpperCase() === "PI") return Math.PI;
+        return evalVar(w, seen);
+      }
+      const nm = /^[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?/.exec(s.slice(i));
+      if (!nm) throw new Error("파싱오류 @" + i + " in " + src);
+      i += nm[0].length; let val = parseFloat(nm[0]);
+      const u = /^[A-Za-z]+/.exec(s.slice(i));
+      if (u) { const f = UNIT[u[0].toLowerCase()]; if (f !== undefined) { val *= f; i += u[0].length; } }
+      return val;
+    }
+    function term() { let v = atom(); for (;;) { ws(); if (s[i] === "*") { i++; v *= atom(); } else if (s[i] === "/") { i++; v /= atom(); } else break; } return v; }
+    function expr() { let v = term(); for (;;) { ws(); if (s[i] === "+") { i++; v += term(); } else if (s[i] === "-") { i++; v -= term(); } else break; } return v; }
+    return expr();
+  }
+  // 후보 이름 중 첫 평가 성공값 (없으면 undefined)
+  const V = (...names) => { for (const n of names) { try { const v = evalVar(n, new Set()); if (isFinite(v)) return v; } catch (e) { /* skip */ } } return undefined; };
+
+  const D_ro = V("D_ro"), T_m = V("T_m"), g = V("g"), D_so = V("D_so"), T_Yoke = V("T_Yoke");
+  const N_slot = V("N_slot", "Slots"), N_pole = V("N_pole", "Poles"), a_m = V("a_m", "Embrace");
+  const D_si = V("D_si") ?? (D_ro !== undefined && g !== undefined ? D_ro + 2 * g : undefined);
+  const offset = V("Magnet_R_Offset", "MagOffset");
+  const geo = {}, wind = {}, applied = [], missing = [];
+  const set = (obj, k, v, label) => { if (v !== undefined && isFinite(v)) { obj[k] = +v.toFixed(3); applied.push(label || k); } else missing.push(label || k); };
+
+  set(geo, "statorLamDia", D_so, "statorLamDia(D_so)");
+  set(geo, "statorBore", D_si, "statorBore(D_si)");
+  set(geo, "airgap", g ?? (D_si !== undefined && D_ro !== undefined ? (D_si - D_ro) / 2 : undefined), "airgap(g)");
+  set(geo, "shaftDia", V("D_shaft", "D_sh"), "shaftDia(D_shaft)");
+  set(geo, "slotNumber", N_slot !== undefined ? Math.round(N_slot) : undefined, "slotNumber(N_slot)");
+  set(geo, "poleNumber", N_pole !== undefined ? Math.round(N_pole) : undefined, "poleNumber(N_pole)");
+  const W_t = V("W_t", "Wt"), W_so = V("W_so", "Bs0"), d_1 = V("d_1", "d1"), d_2 = V("d_2", "d2");
+  set(geo, "toothWidth", W_t, "toothWidth(W_t)");
+  set(geo, "slotOpening", W_so, "slotOpening(W_so)");
+  set(geo, "toothTipDepth", d_1 ?? d_2, "toothTipDepth(d_1)");
+  // 톱니팁 테이퍼각: 직선개구(d_1) 끝 A2에서 톱니측면(반경 R3=보어+d_1+d_2)까지의 각도.
+  // 이렇게 두면 모델 buildSlotPath의 A3가 정확히 R3에 떨어져 Maxwell d_1·d_2 구성과 일치.
+  let toothTipAngle;
+  if ([D_si, N_slot, W_t, W_so, d_1, d_2].every((x) => x !== undefined)) {
+    const Rb = D_si / 2, halfOp = W_so / 2, x1 = Math.sqrt(Math.max(Rb * Rb - halfOp * halfOp, 0));
+    const A2x = x1 + d_1, A2y = halfOp, dlt = Math.PI / N_slot;
+    const R3 = Rb + d_1 + d_2, t = Math.sqrt(Math.max(R3 * R3 - (W_t / 2) ** 2, 0));
+    const A3x = Math.cos(dlt) * t + Math.sin(dlt) * W_t / 2, A3y = Math.sin(dlt) * t - Math.cos(dlt) * W_t / 2;
+    const ang = Math.atan2(A3x - A2x, A3y - A2y) / D2Rl;
+    if (isFinite(ang) && ang > 0 && ang < 30) toothTipAngle = ang;
+  }
+  set(geo, "toothTipAngle", toothTipAngle, "toothTipAngle(d_2→테이퍼)");
+  // 슬롯깊이 = 슬롯바닥반경(D_so/2−T_Yoke) − 보어반경
+  const slotDepth = (D_so !== undefined && T_Yoke !== undefined && D_si !== undefined) ? (D_so / 2 - T_Yoke) - D_si / 2 : undefined;
+  set(geo, "slotDepth", slotDepth, "slotDepth(D_so/2−T_Yoke−D_si/2)");
+  set(geo, "magnetThickness", T_m, "magnetThickness(T_m)");
+  set(geo, "magnetArcED", a_m !== undefined ? Math.min(180, a_m * 180) : undefined, "magnetArcED(a_m×180)");
+  // 자석 R 면취: 외측호 오프셋(Magnet_R_Offset)에서 모델 정의(Ro−hypot(xe,W2))로 환산.
+  let reduction;
+  if ([D_ro, T_m, N_pole, a_m, offset].every((x) => x !== undefined)) {
+    const Ro = D_ro / 2, Ri = Ro - T_m, halfA = (a_m * 180 / N_pole) * D2Rl, W2 = Ri * Math.sin(halfA), Ra = Ro - offset;
+    if (Ra > W2 && offset >= 0 && offset < Ro) reduction = Math.max(0, Ro - Math.hypot(offset + Math.sqrt(Ra * Ra - W2 * W2), W2));
+  }
+  set(geo, "magnetReduction", reduction, "magnetReduction(offset→면취)");
+  const Lstk = V("L_stk", "Lstk", "L_stack", "Length");
+  if (Lstk !== undefined) { ["stackLength", "magnetLength", "rotorLamLength", "magneticLength"].forEach((k) => { geo[k] = +Lstk.toFixed(3); }); applied.push("축길이(L_stk)"); }
+  else missing.push("축길이(L_stk)");
+  set(wind, "turnsPerCoil", (() => { const z = V("Zc", "N_turns", "TurnsPerCoil"); return z !== undefined ? Math.round(z) : undefined; })(), "turnsPerCoil(Zc)");
+  const aVar = V("a", "ParallelPaths"); if (aVar !== undefined && aVar >= 1) wind.parallelPaths = Math.round(aVar);
+  // Maxwell 슬롯 바닥은 직선(동심호 아님) — DXF 검증 완료. 임포트 시 직선 바닥으로 설정.
+  geo.slotBottomShape = "straight"; applied.push("슬롯바닥=직선(Maxwell)");
+  // 권선 와이어: .aedt는 턴수만 줌(가닥·굵기 없음 — Maxwell 2D 미저장). 1250W 와이어가 작은 슬롯을
+  // 넘치게 하므로, 슬롯면적 기준 단선으로 ~40% Cu 채움이 되도록 자동 산정(실제 사양 입력 권장).
+  if (wind.turnsPerCoil > 0 && geo.statorBore && geo.slotDepth && geo.toothWidth) {
+    try {
+      const slotArea = shoelace(buildSlotPath(geo));            // mm²
+      const baseWind = { ...WIND0, ...wind, strands: 1 };
+      let dCu = Math.sqrt(0.42 * slotArea * 4 / (2 * wind.turnsPerCoil * Math.PI)); // 초기추정(슬롯 42%)
+      let fitOK = false;
+      // 실제 패킹(직선바닥·라이너·웻지·디바이더 반영)으로 턴수가 들어갈 때까지 와이어 축소 → 들어가는 최대 굵기.
+      for (let it = 0; it < 18 && dCu > 0.1; it++) {
+        const pk = packConductors(geo, { ...baseWind, wireDia: dCu / 0.9, copperDia: dCu });
+        if (pk.capacity >= wind.turnsPerCoil) { fitOK = true; break; }
+        dCu *= 0.94;
+      }
+      if (isFinite(dCu) && dCu > 0.05) {
+        wind.strands = 1; wind.copperDia = +dCu.toFixed(3); wind.wireDia = +(dCu / 0.9).toFixed(3);
+        applied.push(`와이어 자동(Ø${wind.wireDia}·1가닥${fitOK ? ", 슬롯에 맞춤" : ", 슬롯한계"})`);
+      }
+    } catch (e) { /* 형상 불완전 시 와이어 유지 */ }
+  }
+
+  return { geo, wind, applied, missing, varCount: Object.keys(vars).length };
+}
+
 // ─── 형상 생성 ───────────────────────────────────────────────────
 function buildSlotPath(P) {
   const Rb = P.statorBore / 2, Rd = Rb + P.slotDepth, halfOp = P.slotOpening / 2;
@@ -336,6 +463,14 @@ function buildSlotPath(P) {
     const s = (bx * (-u[1]) - by * (-u[0])) / det;
     A3 = [A2[0] + s * d[0], A2[1] + s * d[1]];
   }
+  if (P.slotBottomShape === "straight") {
+    // 직선 바닥 (Ansys Maxwell): 톱니측면이 Rd·cos(반슬롯피치) 투영까지 직선으로 나간 뒤,
+    // 슬롯 중심 바닥정점(Rd,0)으로 직선 연결 — DXF 검증: 가장자리 R=hypot(Rd·cosδ,Wt/2), 정점 R=Rd.
+    const tEnd = Rd * Math.cos(dlt);
+    const A4 = [tEnd * u[0] + nv[0], tEnd * u[1] + nv[1]];
+    return [A1, A2, A3, A4, [Rd, 0], [A4[0], -A4[1]], [A3[0], -A3[1]], [A2[0], -A2[1]], [A1[0], -A1[1]]];
+  }
+  // 동심호 바닥 (Motor-CAD 기본) — 반경 Rd 일정한 호
   const tEnd = Math.sqrt(Math.max(Rd * Rd - (P.toothWidth / 2) ** 2, 0));
   const A4 = [tEnd * u[0] + nv[0], tEnd * u[1] + nv[1]];
   const a4 = Math.atan2(A4[1], A4[0]);
@@ -394,6 +529,50 @@ const shoelace = (pts) => {
   }
   return Math.abs(a) / 2;
 };
+
+// ─── DXF 형상 정합 자동검사 (모델↔실제 DXF 잔차) ─────────────────
+// tools/verify_fit.mjs 와 동일 로직을 앱에 내장. "맞는다"를 눈이 아니라 측정으로 — 임계 초과 시 빨강.
+// 정점만 비교하면 직선구간 중간의 호 볼록을 놓치므로 반드시 조밀화+양방향.
+const FIT_TOL_STATOR = 0.3, FIT_TOL_MAG = 0.6; // mm (자석은 모델 코너필렛 미지원분 허용)
+function fitResidual(dxf, P) {
+  if (!dxf || !(P.slotNumber > 0) || !(P.poleNumber > 0) || !(P.statorBore > 0)) return null;
+  const distSeg = (p, a, b) => { const vx = b[0] - a[0], vy = b[1] - a[1], wx = p[0] - a[0], wy = p[1] - a[1]; const c1 = wx * vx + wy * vy; if (c1 <= 0) return Math.hypot(wx, wy); const c2 = vx * vx + vy * vy; if (c2 <= c1) return Math.hypot(p[0] - b[0], p[1] - b[1]); const t = c1 / c2; return Math.hypot(p[0] - (a[0] + t * vx), p[1] - (a[1] + t * vy)); };
+  const distPoly = (p, poly, open) => { let m = Infinity; const lim = open ? poly.length - 1 : poly.length; for (let i = 0; i < lim; i++) { const d = distSeg(p, poly[i], poly[(i + 1) % poly.length]); if (d < m) m = d; } return m; };
+  const distPolys = (p, polys) => { let m = Infinity; for (const poly of polys) { const d = distPoly(p, poly); if (d < m) m = d; } return m; };
+  const densify = (pts, step, closeIt) => { const out = []; const n = pts.length; const lim = closeIt ? n : n - 1; for (let i = 0; i < lim; i++) { const a = pts[i], b = pts[(i + 1) % n]; const L = Math.hypot(b[0] - a[0], b[1] - a[1]); const k = Math.max(1, Math.ceil(L / step)); for (let j = 0; j < k; j++) { const t = j / k; out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); } } if (!closeIt) out.push(pts[n - 1]); return out; };
+  const circs = dxf.filter((s) => s.type === "circle");
+  const med = (a) => { const s = a.slice().sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  const cx = circs.length ? med(circs.map((c) => c.cx)) : 0, cy = circs.length ? med(circs.map((c) => c.cy)) : 0;
+  const C = ([x, y]) => [x - cx, y - cy], R = ([x, y]) => Math.hypot(x, y);
+  const Rb = P.statorBore / 2, Rd = Rb + P.slotDepth;
+  const Ro = (P.statorBore - 2 * P.airgap) / 2 - (P.bandingThickness || 0), Ri = Ro - P.magnetThickness;
+  const closed = dxf.filter((s) => s.type === "poly" && s.closed && s.pts.length >= 10).sort((a, b) => b.pts.length - a.pts.length);
+  if (!closed.length) return null;
+  const STEP = 0.2;
+  const lamC = densify(closed[0].pts.map(C), 0.15, true);
+  const lamInner = lamC.filter((p) => { const r = R(p); return r >= Rb - 0.3 && r <= Rd + 0.15; });
+  const pitchS = 2 * Math.PI / P.slotNumber;
+  const buildSlots = (rot) => { const a = []; for (let k = 0; k < P.slotNumber; k++) a.push(rotPts(buildSlotPath(P), rot + k * pitchS)); return a; };
+  let bestRotS = 0, bestMean = Infinity;
+  for (let a = 0; a < pitchS; a += pitchS / 60) { const slots = buildSlots(a); let sum = 0; for (const p of lamInner) sum += Math.min(distPolys(p, slots), Math.abs(R(p) - Rb)); if (sum < bestMean) { bestMean = sum; bestRotS = a; } }
+  const slots = buildSlots(bestRotS);
+  const modelPts = slots.flatMap((poly) => densify(poly, STEP, false)).filter((p) => R(p) > Rb + 0.3);
+  let sMax = 0, sBot = 0; const isBot = (p) => R(p) > Rb + P.slotDepth * 0.5;
+  for (const p of lamInner) { const d = Math.min(distPolys(p, slots), Math.abs(R(p) - Rb)); if (d > sMax) sMax = d; if (isBot(p) && d > sBot) sBot = d; }
+  for (const m of modelPts) { const d = distPoly(m, lamC); if (d > sMax) sMax = d; if (isBot(m) && d > sBot) sBot = d; }
+  const magPolys = closed.filter((s) => { const rs = s.pts.map((p) => R(C(p))); const rmin = Math.min(...rs), rmax = Math.max(...rs); return rmax <= Ro + 0.8 && rmax >= Ro - 1.5 && rmin >= Ri - 1.5 && s.pts.length < 200; });
+  let mMax = null, bestRotM = 0;
+  if (magPolys.length) {
+    const magDxf = magPolys.map((s) => densify(s.pts.map(C), STEP, true)), magDxfPts = magDxf.flat();
+    const pitchM = 2 * Math.PI / P.poleNumber;
+    const buildMags = (rot) => { const a = []; for (let k = 0; k < P.poleNumber; k++) a.push(rotPts(buildMagnetPath(P), rot + k * pitchM)); return a; };
+    let bm = Infinity; for (let a = 0; a < pitchM; a += pitchM / 60) { const mags = buildMags(a); let sum = 0; for (const p of magDxfPts) sum += distPolys(p, mags); if (sum < bm) { bm = sum; bestRotM = a; } }
+    const mags = buildMags(bestRotM); mMax = 0; for (const p of magDxfPts) mMax = Math.max(mMax, distPolys(p, mags));
+    const modelMagPts = mags.flatMap((poly) => densify(poly, STEP, true)); for (const m of modelMagPts) mMax = Math.max(mMax, distPolys(m, magDxf));
+  }
+  const statorOK = sMax <= FIT_TOL_STATOR, magOK = mMax === null || mMax <= FIT_TOL_MAG;
+  return { sMax, sBot, statorRot: bestRotS * 180 / Math.PI, mMax, magCount: magPolys.length, statorOK, magOK, ok: statorOK && magOK };
+}
 
 // ─── 권선 패턴 + 권선계수 (star of slots, 2층) ───────────────────
 function windingAnalysis(Ns, poles, throw_, Nc) {
@@ -693,7 +872,7 @@ const GEO0 = {
   slotNumber: 18, statorLamDia: 114, statorBore: 79.66, toothWidth: 4.6,
   slotDepth: 14.2, toothTipDepth: 0.5, slotOpening: 0.56, toothTipAngle: 4,
   poleNumber: 16, magnetThickness: 3.6, magnetReduction: 1.3, magnetArcED: 145,
-  airgap: 0.5, bandingThickness: 0, shaftDia: 62, statorRot: 0, rotorRot: 0,
+  airgap: 0.5, bandingThickness: 0, shaftDia: 62, statorRot: 0, rotorRot: 0, slotBottomShape: "arc",
   stackLength: 30, magnetLength: 30, rotorLamLength: 30, magneticLength: 27.9, motorLength: 70,
 };
 const WIND0 = {
@@ -1104,7 +1283,7 @@ export default function MiniMotorCad() {
       <div className="flex-1 min-h-0 overflow-hidden">
         <ErrorBoundary resetKey={JSON.stringify([geo, wind, mat, calc, therm, tab])}
           onReset={() => { setGeo(GEO0); setWind(WIND0); setMat(MAT0); setCalc(CALC0); setTherm(THERM0); setFemmCal(null); }}>
-          {tab === "geometry" && <GeometryTab geo={geo} sG={sG} res={res} resetGeo={() => setGeo(GEO0)} />}
+          {tab === "geometry" && <GeometryTab geo={geo} sG={sG} sW={sW} res={res} resetGeo={() => setGeo(GEO0)} />}
           {tab === "winding" && <WindingTab geo={geo} wind={wind} sW={sW} res={res} showRef={showRef} />}
           {tab === "materials" && <MaterialsTab mat={mat} sM={sM} res={res} showRef={showRef} />}
           {tab === "calculation" && <CalculationTab geo={geo} calc={calc} sC={sC} wind={wind} sW={sW} res={res} solved={solved} setSolved={setSolved} femmCal={femmCal} setFemmCal={setFemmCal} />}
@@ -1119,20 +1298,25 @@ export default function MiniMotorCad() {
 }
 
 // ─── Geometry 탭 (DXF 매칭) ──────────────────────────────────────
-function GeometryTab({ geo, sG, res, resetGeo }) {
+function GeometryTab({ geo, sG, sW, res, resetGeo }) {
   const [dxf, setDxf] = useState(null);
   const [dxfName, setDxfName] = useState("");
   const [autoInfo, setAutoInfo] = useState(null);
+  const [aedtInfo, setAedtInfo] = useState(null);
   const [dxfT, setDxfT] = useState({ scale: 1, dx: 0, dy: 0, rot: 0 });
   const [layers, setLayers] = useState({ dxf: true, stator: true, slots: true, rotor: true, magnets: true });
   const [opacity, setOpacity] = useState(0.45);
   const [measure, setMeasure] = useState(false);
   const [mPts, setMPts] = useState([]);
   const [cursor, setCursor] = useState(null);
-  const canvasRef = useRef(null), wrapRef = useRef(null), fileRef = useRef(null);
+  const canvasRef = useRef(null), wrapRef = useRef(null), fileRef = useRef(null), aedtRef = useRef(null);
   const viewRef = useRef({ scale: 6, ox: 0, oy: 0, init: false });
   const dragRef = useRef(null);
   const rotorDia = geo.statorBore - 2 * geo.airgap;
+  // DXF 형상 정합 자동검사 — 형상 관련 파라미터가 바뀔 때만 재계산.
+  const fit = useMemo(() => (dxf ? fitResidual(dxf, geo) : null),
+    [dxf, geo.statorBore, geo.slotDepth, geo.slotNumber, geo.toothWidth, geo.slotOpening, geo.toothTipDepth,
+     geo.toothTipAngle, geo.poleNumber, geo.magnetThickness, geo.magnetArcED, geo.magnetReduction, geo.airgap, geo.bandingThickness, geo.slotBottomShape]);
 
   const w2s = (x, y, V) => [V.ox + x * V.scale, V.oy - y * V.scale];
   const s2w = (sx, sy, V) => [(sx - V.ox) / V.scale, (V.oy - sy) / V.scale];
@@ -1274,6 +1458,16 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
       if (autoPendingRef.current) { const m = autoPendingRef.current; autoPendingRef.current = false; m === "fit" ? runFit(shapes) : runExtract(shapes); }
     } catch (err) { alert("DXF 파싱 실패: " + err.message); }
   };
+  const loadAedt = async (file) => {
+    try {
+      const text = await file.text();
+      const r = parseAedt(text);
+      if (!r) { alert("AEDT 설계변수(VariableProp)를 찾지 못했습니다."); return; }
+      Object.entries(r.geo).forEach(([k, v]) => sG(k, v));
+      if (sW) Object.entries(r.wind).forEach(([k, v]) => sW(k, v));
+      setAedtInfo({ ...r, name: file.name });
+    } catch (err) { alert("AEDT 파싱 실패: " + err.message); }
+  };
   const autoExtract = () => {
     if (!dxf) { autoPendingRef.current = "extract"; fileRef.current?.click(); return; } // 없으면 파일 선택 → 로드 후 자동추출
     runExtract(dxf);
@@ -1300,6 +1494,8 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
     put("toothWidth", ex.toothWidth, 0.2, 100);
     put("magnetThickness", ex.magnetThickness, 0.2, 100);
     if (ex.magnetArcED >= 60 && ex.magnetArcED <= 180) { sG("magnetArcED", ex.magnetArcED); applied.push("magnetArcED"); }
+    // 자석 R 면취(reduction)는 DXF에서 신뢰성 있게 못 뽑음(코너 필렛이 외측호 측정을 오염).
+    // 정확값은 .aedt 불러오기로 설정. DXF 경로에서는 기존 값을 건드리지 않음.
     put("airgap", ex.airgap, 0.05, 5);
     // 정렬: 모델 슬롯(statorRot=0)에 DXF 슬롯을 맞춤. 변환 후 DXF 피처는 world각=θ_raw+rot 이므로 rot=−statorRot.
     sG("statorRot", 0);
@@ -1361,6 +1557,29 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
           <input ref={fileRef} type="file" accept=".dxf" className="hidden"
             onChange={(e) => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ""; }} />
           {dxfName && <div className="text-xs truncate" style={{ color: "#1B7A2B", fontFamily: "Consolas,monospace" }}>{dxfName}</div>}
+          <button onClick={() => aedtRef.current?.click()} className="text-xs px-2 py-1.5 rounded font-semibold" style={{ background: `linear-gradient(180deg,${UI.cyan},#1f9fb5)`, color: "#06222a" }}>⬇ AEDT 불러오기 (설계변수 정확 적용)</button>
+          <input ref={aedtRef} type="file" accept=".aedt" className="hidden"
+            onChange={(e) => { if (e.target.files[0]) loadAedt(e.target.files[0]); e.target.value = ""; }} />
+          {aedtInfo && (
+            <div className="text-xs rounded p-2" style={{ background: "#08222a", border: `1px solid ${UI.cyan}`, fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
+              <div className="font-bold mb-0.5" style={{ color: UI.cyan }}>AEDT 적용 완료 — {aedtInfo.varCount}개 변수</div>
+              <div className="truncate" style={{ color: "#1B7A2B" }}>{aedtInfo.name}</div>
+              <div style={{ color: UI.text }}>적용 {aedtInfo.applied.length}개: {aedtInfo.applied.join(" · ")}</div>
+              {aedtInfo.missing.length > 0 && <div style={{ color: "#B5622D" }}>미발견 {aedtInfo.missing.length}개: {aedtInfo.missing.join(" · ")}</div>}
+            </div>
+          )}
+          {dxf && (
+            fit ? (
+              <div className="text-xs rounded p-2" style={{ background: fit.ok ? "#0a2418" : "#2a1212", border: `1px solid ${fit.ok ? "#1B7A2B" : "#d9534f"}`, fontFamily: "Consolas,monospace", lineHeight: 1.5 }}>
+                <div className="font-bold" style={{ color: fit.ok ? "#3ddc84" : "#ff6b6b" }}>{fit.ok ? "🟢 DXF 형상 정합 OK" : "🔴 DXF 형상 불일치"}</div>
+                <div style={{ color: fit.statorOK ? "#9fb8d4" : "#ff9b9b" }}>{fit.statorOK ? "🟢" : "🔴"} 고정자 잔차 {fit.sMax.toFixed(2)}mm (바닥 {fit.sBot.toFixed(2)})</div>
+                <div style={{ color: fit.magOK ? "#9fb8d4" : "#ff9b9b" }}>{fit.magOK ? "🟢" : "🔴"} 자석 잔차 {fit.mMax === null ? "—" : fit.mMax.toFixed(2) + "mm"} {fit.magCount ? `(${fit.magCount}극)` : ""}</div>
+                <div style={{ color: "#7e8eac" }}>임계 고정자 {FIT_TOL_STATOR}/자석 {FIT_TOL_MAG}mm · 모델↔DXF 측정</div>
+              </div>
+            ) : (
+              <div className="text-xs rounded p-2" style={{ background: "#0c1424", border: "1px solid #22304d", color: "#7e8eac", fontFamily: "Consolas,monospace" }}>형상 정합검사: 비교 가능한 닫힌 폴리 없음</div>
+            )
+          )}
           <div className="flex gap-1">
             <button onClick={fitView} className="flex-1 text-xs px-2 py-1 rounded" style={{ border: "1px solid #22304d", background: "#101a30", color: "#c4d0e4" }}>화면 맞춤</button>
             <button onClick={() => { setMeasure(!measure); setMPts([]); }} className="flex-1 text-xs px-2 py-1 rounded"
@@ -1404,6 +1623,14 @@ function GeometryTab({ geo, sG, res, resetGeo }) {
           )}
         </div>
         <SectionHead color="#E03030">Stator Parameters</SectionHead>
+        <div className="flex items-center justify-between px-2 py-1" style={{ borderBottom: "1px solid #1a2942" }}>
+          <span className="text-xs" style={{ color: "#8fa3c4" }}>슬롯 바닥</span>
+          <select value={geo.slotBottomShape || "arc"} onChange={(e) => sG("slotBottomShape", e.target.value)}
+            className="text-xs px-1 py-0.5 rounded" style={{ background: "#101a30", color: "#c4d0e4", border: "1px solid #22304d", fontFamily: "Consolas,monospace" }}>
+            <option value="arc">동심호 (Motor-CAD)</option>
+            <option value="straight">직선 (Maxwell)</option>
+          </select>
+        </div>
         {SFIELDS.map(([k, l, s]) => <NumIn key={k} label={l} value={geo[k]} step={s} onChange={(v) => sG(k, v)} />)}
         <SectionHead color="#22BB22">Rotor Parameters</SectionHead>
         {RFIELDS.map(([k, l, s]) => <NumIn key={k} label={l} value={geo[k]} step={s} onChange={(v) => sG(k, v)} />)}
@@ -1461,9 +1688,20 @@ function packConductors(geo, wind) {
   const RdL = Rd - liner;
   const divHalf = wind.coilDivider / 2;
   const sD = Math.sin(dlt), cD = Math.cos(dlt);
+  // 슬롯 바닥 형상별 제약: 직선바닥이면 동심호(hypot)가 아니라 두 직선(A4→정점)을 경계로.
+  const straight = geo.slotBottomShape === "straight";
+  let bnx = 0, bny = 0, bc = 0, blen = 1;
+  if (straight) {
+    const tEnd0 = Rd * cD;
+    const ax = tEnd0 * cD + sD * geo.toothWidth / 2, ay = tEnd0 * sD - cD * geo.toothWidth / 2; // A4(+y)
+    bnx = ay; bny = Rd - ax; blen = Math.hypot(bnx, bny) || 1; bc = ay * Rd; // +y 바닥선: bnx·x+bny·y=bc (원점쪽 음수)
+  }
   const ok = (x, y) => {
     if (x < xMin + r) return false;
-    if (Math.hypot(x, y) > RdL - r) return false;
+    if (straight) {
+      if ((bnx * x + bny * y - bc) / blen > -(liner + r)) return false;   // +y 바닥직선 안쪽
+      if ((bnx * x - bny * y - bc) / blen > -(liner + r)) return false;   // -y 바닥직선 안쪽
+    } else if (Math.hypot(x, y) > RdL - r) return false;                   // 동심호 바닥
     if (sD * x - cD * y < wallLim + r) return false;    // 상부 치 벽
     if (sD * x + cD * y < wallLim + r) return false;    // 하부 치 벽
     if (Math.abs(y) < divHalf + r + sep / 2) return false; // 코일 디바이더
@@ -1497,10 +1735,18 @@ function packConductors(geo, wind) {
     return cells;
   };
   const right = packSide(1), left = packSide(-1);
+  // 권선영역(라이너 안쪽) 상단 모서리 — 렌더용. 직선바닥이면 치벽∩(바닥-라이너), 정점은 바닥선∩축.
+  let WtopS = null, apexS = null;
+  if (straight) {
+    const blc = bc - liner * blen;                                   // +y 바닥선을 라이너만큼 안쪽 평행이동
+    const yTop = (blc - bnx * (wallLim / sD)) / (bnx * cD / sD + bny); // 치벽(sD·x−cD·y=wallLim)과 교점
+    WtopS = [(wallLim + cD * yTop) / sD, yTop];
+    apexS = [blc / bnx, 0];                                          // 바닥선 ∩ x축(슬롯중심 바닥)
+  }
   return {
     left: left.slice(0, targetSide), right: right.slice(0, targetSide),
     capacity: Math.min(left.length, right.length), targetSide,
-    geo: { x1, Rd, RdL, xMin, dlt, wallLim, divHalf },
+    geo: { x1, Rd, RdL, xMin, dlt, wallLim, divHalf, straight, WtopS, apexS },
   };
 }
 
@@ -1552,12 +1798,18 @@ function SlotViewer({ geo, wind, res }) {
     const g2 = pack.geo;
     const u = [Math.cos(dlt), Math.sin(dlt)];
     const wl = g2.wallLim;
-    const tEnd = Math.sqrt(Math.max(g2.RdL ** 2 - wl ** 2, 0));
     const tAtXmin = (g2.xMin - Math.sin(dlt) * wl) / Math.cos(dlt);
     const W1 = [g2.xMin, tAtXmin * Math.sin(dlt) - Math.cos(dlt) * wl];
-    const Wtop = [tEnd * Math.cos(dlt) + Math.sin(dlt) * wl, tEnd * Math.sin(dlt) - Math.cos(dlt) * wl];
-    const aT = Math.atan2(Wtop[1], Wtop[0]);
-    const wpoly = [W1, Wtop, ...arcPts(g2.RdL, aT, -aT, 40), [Wtop[0], -Wtop[1]], [W1[0], -W1[1]]];
+    let wpoly;
+    if (g2.straight && g2.WtopS && g2.apexS) {
+      // 직선 바닥: 모서리(Wtop) → 슬롯중심 바닥정점(apex) → 대칭. 호 아님.
+      wpoly = [W1, g2.WtopS, g2.apexS, [g2.WtopS[0], -g2.WtopS[1]], [W1[0], -W1[1]]];
+    } else {
+      const tEnd = Math.sqrt(Math.max(g2.RdL ** 2 - wl ** 2, 0));
+      const Wtop = [tEnd * Math.cos(dlt) + Math.sin(dlt) * wl, tEnd * Math.sin(dlt) - Math.cos(dlt) * wl];
+      const aT = Math.atan2(Wtop[1], Wtop[0]);
+      wpoly = [W1, Wtop, ...arcPts(g2.RdL, aT, -aT, 40), [Wtop[0], -Wtop[1]], [W1[0], -W1[1]]];
+    }
     ctx.fillStyle = "#66DD66";
     poly(wpoly); ctx.fill();
     // 4) 웨지(회색): 팁 영역 — Wedge 모델일 때만
@@ -1568,9 +1820,10 @@ function SlotViewer({ geo, wind, res }) {
       poly([[xw0, halfOp + 0.35], [xw1, halfOp + 0.9], [xw1, -halfOp - 0.9], [xw0, -halfOp - 0.35]]);
       ctx.fill();
     }
-    // 5) 코일 디바이더(연회색 세로 막대)
+    // 5) 코일 디바이더(연회색 세로 막대) — 직선바닥이면 바닥정점까지
+    const divOut = (g2.straight && g2.apexS ? g2.apexS[0] : g2.RdL) - 0.2;
     ctx.fillStyle = "#E8EEF2";
-    poly([[g2.xMin, g2.divHalf], [g2.RdL - 0.2, g2.divHalf], [g2.RdL - 0.2, -g2.divHalf], [g2.xMin, -g2.divHalf]]);
+    poly([[g2.xMin, g2.divHalf], [divOut, g2.divHalf], [divOut, -g2.divHalf], [g2.xMin, -g2.divHalf]]);
     ctx.fill();
     // 6) 도선 원 (노랑 + 절연 링)
     const rW = wind.wireDia / 2, rC = wind.copperDia / 2;

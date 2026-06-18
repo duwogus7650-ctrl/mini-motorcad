@@ -101,8 +101,14 @@ function extractGeometry(shapes) {
     for (let i = 0; i < desc.length - 1; i++) { if (desc[i + 1] < 1e-6) continue; const r = desc[i] / desc[i + 1]; if (r > bestR) { bestR = r; cut = i; } }
     return bestR > 1.4 && cut + 1 >= 2 ? cut + 1 : n;
   };
-  const wrap = (a, p) => a - p * Math.round(a / p);
-  const meanRot = (arr, p) => arr.reduce((s, a) => s + wrap(a, p), 0) / arr.length;
+  const meanRot = (arr, p) => {
+    if (!arr.length) return 0;
+    const n = 360 / p;
+    let S = 0, C = 0;
+    for (const a of arr) { S += Math.sin(n * a * D2R); C += Math.cos(n * a * D2R); }
+    if (Math.abs(S) < 1e-12 && Math.abs(C) < 1e-12) return 0;
+    return Math.atan2(S, C) / D2R / n;
+  };
   const median = (arr) => { if (!arr.length) return 0; const a = arr.slice().sort((p, q) => p - q); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
   let slotCount = 0, poleCount = 0, rotorOD = 0, airgap = 0, statorRot = 0, rotorRot = 0, borePoly = 0, outerN = 0, innerN = 0, slotRout = 0, slotSpan = 0, magThk = 0, magSpan = 0;
   if (polyInfo.length) {
