@@ -619,6 +619,7 @@ const STEELS = {
   "20PNX1200F": { density: 7650, kh: 0.0212, ke: 4.157e-5, thk: 0.2 },
   "35PN230":    { density: 7600, kh: 0.028,  ke: 9.0e-5,  thk: 0.35 },
   "50PN470":    { density: 7700, kh: 0.038,  ke: 2.2e-4,  thk: 0.5 },
+  "M350-50A":   { density: 7650, kh: 0.024,  ke: 1.4e-4,  thk: 0.5 },  // 0.5mm 무방향성(3.5W/kg@1.5T50Hz, 손실분리: 와전류∝두께² 고전값~1.1e-4+과잉). 영상 400W 강판.
 };
 const MAGNETS = {
   "N45UH": { Br20: 1.32, tc: -0.12, mur: 1.05, density: 7500 },
@@ -685,6 +686,7 @@ function compute(G, W, M, C, cal) {
   out.femmCal = (cal && Number.isFinite(cal.lam)) ? cal : null;
   const fe = C.speed / 60 * pp;
   out.fe = fe;
+  out.fMech = C.speed / 60;                                   // 기계 회전주파수 [Hz]
   out.Epk = 2 * Math.PI * fe * lam;
   out.Erms = out.Epk / Math.SQRT2;
   out.Ke = pp * lam;
@@ -794,6 +796,7 @@ function compute(G, W, M, C, cal) {
   out.Tshaft = wm > 0 ? out.Pout / wm : 0;
   out.eff = out.Pin > 0 ? (out.Pout / out.Pin) * 100 : 0;
   out.TRV = out.torque / (Math.PI * RoM ** 2 * Lstk * 1e-9) / 1000; // kNm/m³
+  out.rotorPeriphV = wm * RoM * 1e-3;                          // 회전자 외주 선속도 [m/s]
 
   // 전압/무부하속도 (정현 구동, SVPWM 가정)
   const VphAvail = W.connection === "delta" ? C.Vdc : C.Vdc / Math.sqrt(3);
@@ -826,6 +829,7 @@ function compute(G, W, M, C, cal) {
     const lamD = lam + out.Ld * 1e-3 * idL, lamQ = out.Lq * 1e-3 * iqL;
     const dL = Math.atan2(lamQ, lamD);                        // 부하각(전기) [rad]
     out.loadAngle = dL / D2R;                                 // 부하각 [elec deg]
+    out.lamD_load = lamD; out.lamQ_load = lamQ;               // 부하 dq 쇄교자속 [Wb] (Motor-CAD Flux Linkage D/Q on load)
     const per = 360 / pp;
     const nl = (((psi0 + Math.PI / 2) / pp / D2R) % per + per) % per;   // 무부하 상승영점 [mech deg]
     out.iniPosNL = nl;
@@ -841,6 +845,7 @@ function compute(G, W, M, C, cal) {
   const lcmSP = (Ns * poles) / gcd(Ns, poles);
   out.coggingPeriod = 360 / lcmSP;
   out.coggingFreq = (lcmSP * C.speed) / 60;
+  out.optSkew = out.coggingPeriod;                            // 최적 스큐각[기계도] ≈ 코깅 1주기(슬롯고조파 상쇄)
   const RoMm = RoM * 1e-3, RiMm = RiM * 1e-3, Rshm = (G.shaftDia / 2) * 1e-3;
   out.Jrotor = 0.5 * out.mRotor * (RiMm ** 2 + Rshm ** 2) + 0.5 * out.mMagnet * (RoMm ** 2 + RiMm ** 2);
   const we = 2 * Math.PI * fe;
@@ -2361,6 +2366,14 @@ function OutputTab({ res, calc, showRef, solved }) {
             {r("ini_pos (부하시, 전기)", f(res.iniPosE, 1), "°elec")}
             {r("ini_pos (무부하 기준)", f(res.iniPosNL, 2), "°mech")}
             {r("부하각 δL (전기자반작용)", f(res.loadAngle, 1), "°elec")}
+          </Tbl>
+          <Tbl>
+            {r("Flux Linkage D (PM, 무부하)", f(res.lambda * 1000, 3), "mVs", 15.70, true)}
+            {r("Flux Linkage D (on load)", f(res.lamD_load * 1000, 3), "mVs")}
+            {r("Flux Linkage Q (on load)", f(res.lamQ_load * 1000, 3), "mVs")}
+            {r("Rotor Peripheral Velocity", f(res.rotorPeriphV, 2), "m/s")}
+            {r("Mechanical Frequency", f(res.fMech, 1), "Hz")}
+            {r("Optimum Skew Angle", f(res.optSkew, 2), "MDeg")}
           </Tbl>
           <div className="w-full text-xs px-1" style={{ color: "#7e8eac" }}>ini_pos = U상 <b>부하시 역기전력</b>(전기자반작용 포함)이 0(상승)에서 시작하는 회전자 위치. 무부하 상승영점에서 부하각 δL/pp 만큼 이동(현재 운전점 전류·진각 기준). 전기 1주기(360/pp={f(360 / res.pp, 1)}°mech)마다 반복.</div>
         </>)}
