@@ -450,6 +450,8 @@ function parseAedt(text) {
   // 외전형(아우터로터) 감지: D_ro>D_so 면 로터가 스테이터 바깥 → 내전형 가정 모델과 형상 모순.
   if (outer) {
     geo.rotorType = "outer";
+    geo.magnetReduction = 0;           // 외전형 면취 미추출 → 0(기본값 오적용·메시 슬리버 방지)
+    geo.toothTipAngle = 0;             // 외전형 톱니팁각 미추출 → 0
     if (rotorYoke !== undefined) geo.rotorYoke = +rotorYoke.toFixed(3);
     applied.push("외전형(rotorType=outer)" + (rotorYoke !== undefined ? "+로터백아이언(T_rotorYoke)" : ""));
     warnings.push("외전형(아우터로터) 모델 적용 — 공극면=외경·자석 바깥. 톱니팁각·자석면취는 미반영(근사).");
@@ -2138,11 +2140,15 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
   const runFemm = async () => {
     if (!res) return;
     setFemmBusy(true); setFemmErr(null); setFemmRes(null);
-    const Rb = geo.statorBore / 2, Rro = (geo.statorBore - 2 * geo.airgap) / 2;
+    const outerF = geo.rotorType === "outer";
+    const Rb = geo.statorBore / 2;
+    const Rro = outerF ? geo.statorLamDia / 2 + geo.airgap : (geo.statorBore - 2 * geo.airgap) / 2;   // 자석 공극면
+    const RmF = outerF ? Rro + geo.magnetThickness : Rro - geo.magnetThickness;                        // 자석 반대면
+    const Rcan = outerF ? RmF + (geo.rotorYoke || 0) : 0;                                              // 외전형 로터 캔 외경
     const payload = {
       Ns: geo.slotNumber, poles: geo.poleNumber, statorRot: geo.statorRot, rotorRot: geo.rotorRot,
       depth: geo.magneticLength, slotDepth: geo.slotDepth, toothWidth: geo.toothWidth,    // 2D FEA 깊이 = 유효 자기길이 / 철손샘플용 톱니폭
-      Rlam: geo.statorLamDia / 2, Rb, Rro, Rmi: Rro - geo.magnetThickness, Rsh: geo.shaftDia / 2,
+      Rlam: geo.statorLamDia / 2, Rb, Rro, Rmi: RmF, Rsh: geo.shaftDia / 2, rotorType: geo.rotorType, Rcan,
       slotPoly: buildSlotPath(geo), magnetPoly: buildMagnetPath(geo), slotTurns: res.wa.table,
       Ipk: res.IphRms * Math.SQRT2, Br: res.Br_used, slotArea: res.slotArea,
       phaseAdv: calc.phaseAdv, parallelPaths: wind.parallelPaths, speed: calc.speed,

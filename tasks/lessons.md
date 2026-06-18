@@ -126,4 +126,17 @@
   가정식이라 외전형선 미반영(근사, 안내 표시).
 - 검증: 사용자 .aedt 11개 **전부 임포트+형상+compute 🟢**(외전형 OuterType 30S32P·SPG_X12 36S40P 포함).
   eval 추출 도구는 reflectOuter도 추출해야 함(앱 본체는 정상인데 verify에서 ReferenceError였음).
-  남은 단계: 렌더(GeometryTab/SlotViewer 외전형 그리기)·FEMM 외전형 빌드.
+
+## 2026-06-19 — 외전형 지원 ③ FEMM FEA (femm_server.py)
+
+- build() 외전형: 외곽원 arc(Rb)+arc(Rcan)(내전형 arc(Rlam)), 라벨 반경(치·에어갭·로터코어·코일)
+  토폴로지별, 로터 group은 **2단 selectcircle**(전체→group1, Rro−ε 안쪽→group0). 슬롯 톱니면·자석 폴갭
+  아크는 반사 폴리의 끝점(A1·mp)이 올바른 반경으로 반사돼 자동 정상. 샘플링(flux_linkage·airgap_bn·
+  sample_iron·iron_loss)은 d['_Rslotmid'/'_Rairgap'/'_Ry*'] 토폴로지 반경 사용.
+- **버그 3개 디버깅**(에러 메시지가 정확히 안내): ① 메시크기 gGap=Rb−Rro·lmMag=Rro−Rmi가 외전형서
+  음수→자석메시 0→"small angles" 삼각화 실패 → abs()+Rag. ② 외전형 내경 마운팅홀 미라벨→"Material
+  not defined for all regions" → 공기 라벨 추가. ③ 로터그룹 내측 selectcircle을 (Rlam+Rro)/2로 두니
+  에어갭 라벨이 group1로 빨려 로터가 group0 공기에 안 둘러싸임→응력텐서 토크=0(부하 전부 0.000) →
+  Rro−ε로 에어갭 전체를 group0에. magnetReduction은 외전형서 미추출→0(기본1.3 면취가 메시 슬리버 유발).
+- 결과: 외전형 OuterType 30S32P FEA **토크 1.294Nm·λ 2.63mVs·Bg 1.035T 정상**. 내전형 무회귀
+  (400W FEMM λ14.22·토크1.254 불변). 교훈: 토폴로지 반전은 반경 부호(abs)·미라벨 영역·그룹경계가 함정.

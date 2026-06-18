@@ -83,17 +83,23 @@ def build(d):
     sROT, rROT = d['statorRot'] * D2R, d['rotorRot'] * D2R
     slotDepth = d['slotDepth']
     Rd = Rb + slotDepth
+    # 토폴로지: 외전형은 공극면=스테이터 OD(Rlam), 자석·로터캔이 바깥.
+    outer = d.get('rotorType') == 'outer'
+    Rcan = d.get('Rcan') or Rlam               # 외전형 로터 캔 외경
+    Rag = Rlam if outer else Rb                # 공극면 반경
+    Rtooth = (Rag + (Rlam - slotDepth)) / 2 if outer else (Rb + Rd) / 2   # 치 라벨 반경
+    Rbound = Rcan if outer else Rlam           # 외곽 경계(ABC)
     murMag = 1.05
     Hc = d['Br'] / (MU0 * murMag)
 
     # 형상 상대 메시 크기[mm] — 이 모터 치수에서 매번 산정 (다른 모터면 자동으로 달라짐)
-    gGap = Rb - Rro                                    # 에어갭 두께
-    lmMag = max(Rro - Rmi, 1e-3)                       # 자석 두께
-    slotPitchArc = 2 * math.pi * Rb / Ns              # 보어 둘레 슬롯피치
+    gGap = abs(Rro - Rag)                              # 에어갭 두께(토폴로지 무관)
+    lmMag = max(abs(Rro - Rmi), 1e-3)                  # 자석 두께(외전형 Rmi>Rro → abs)
+    slotPitchArc = 2 * math.pi * Rag / Ns             # 공극면 둘레 슬롯피치
     mSteel = slotPitchArc * FR_STEEL
     mMag = lmMag * FR_MAG
     mCoil = slotDepth * FR_COIL
-    mExt = Rlam * FR_EXT
+    mExt = Rbound * FR_EXT                              # 외곽(외전형 캔) 기준
     print('[build] 메시[mm] 철심%.2f 자석%.2f 코일%.2f 외부%.2f / 에어갭=자동(g=%.2f)'
           % (mSteel, mMag, mCoil, mExt, gGap), flush=True)
 
@@ -125,8 +131,11 @@ def build(d):
     for i in range(Ns):
         femm.mi_addmaterial('Coil%d' % i, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)
 
-    # 스테이터 OD (샤프트 원은 생략 — 로터 중심부를 한 영역으로)
-    arc(Rlam)
+    # 외곽 경계원: 내전형=스테이터 OD(Rlam). 외전형=스테이터 내경(Rb)+로터 캔(Rcan).
+    if outer:
+        arc(Rb); arc(Rcan)
+    else:
+        arc(Rlam)
 
     # 슬롯 폴리곤 + 치 페이스 아크(보어 Rb) — 보어 완전원 생략
     for i in range(Ns):
@@ -149,16 +158,18 @@ def build(d):
     # 블록 라벨 — 모든 라벨을 축선(x/y축)에서 살짝 비켜 찍는다(OFF). 축 위면 영역 인식 실패.
     OFF = 0.06                                     # rad (~3.4°) 라벨 위치 오프셋
     aT = math.pi / Ns                              # 치 중앙 (이미 비축)
-    label((Rb + Rd) / 2 * math.cos(aT), (Rb + Rd) / 2 * math.sin(aT), 'M-19 Steel', 0, 0, mSteel)
+    label(Rtooth * math.cos(aT), Rtooth * math.sin(aT), 'M-19 Steel', 0, 0, mSteel)
     # 에어갭 공기 라벨 — 연결된 단일 영역이므로 1개만. 매우 얇아 자동메시(강제 시 mesh 실패).
-    rG = (Rro + 3 * Rb) / 4
+    rG = (Rlam + Rro) / 2 if outer else (Rro + 3 * Rb) / 4
     aG = rROT + OFF
     label(rG * math.cos(aG), rG * math.sin(aG), 'Air', 0, 0)        # msize 생략 = 자동
-    rR = Rmi * 0.5
-    label(rR * math.cos(rROT + OFF), rR * math.sin(rROT + OFF), 'M-19 Steel', 0, 1, mSteel)   # 로터 중심부(샤프트+철심)
+    rR = (Rmi + Rcan) / 2 if outer else Rmi * 0.5
+    label(rR * math.cos(rROT + OFF), rR * math.sin(rROT + OFF), 'M-19 Steel', 0, 1, mSteel)   # 로터 철심(내전형 중심부 / 외전형 백아이언 캔)
+    if outer:                                          # 외전형 내경 마운팅홀(공기) — 미라벨 영역 방지
+        label(Rb * 0.5 * math.cos(rROT + OFF), Rb * 0.5 * math.sin(rROT + OFF), 'Air', 0, 0)
     for i in range(Ns):
         a = sROT + i * 2 * math.pi / Ns + OFF
-        rr = Rb + 0.45 * slotDepth
+        rr = (Rlam - 0.45 * slotDepth) if outer else (Rb + 0.45 * slotDepth)
         label(rr * math.cos(a), rr * math.sin(a), 'Coil%d' % i, 0, 0, mCoil)
     for k in range(poles):
         ac = rROT + k * 2 * math.pi / poles        # 자석 중심각(자화방향용)
@@ -170,12 +181,15 @@ def build(d):
         femm.mi_setblockprop('PM', 0, mMag, '<None>', magdir, 1, 0)
         femm.mi_clearselected()
 
-    # 회전자 전체를 group 1로 (에어갭 중간 반경 안쪽)
-    femm.mi_selectcircle(0, 0, (Rro + Rb) / 2, 4)
-    femm.mi_setgroup(1)
-    femm.mi_clearselected()
-    femm.mi_makeABC(5, Rlam * 1.25, 0, 0, 0)
-    label(Rlam * 1.12 * math.cos(0.06), Rlam * 1.12 * math.sin(0.06), 'Air', 0, 0, mExt)  # 외부 공기(비축)
+    # 회전자 group 1. 내전형=에어갭 안쪽 선택. 외전형=전체 group1 후 스테이터+내측에어갭을 group0.
+    if outer:
+        femm.mi_selectcircle(0, 0, Rcan * 1.02, 4); femm.mi_setgroup(1); femm.mi_clearselected()
+        # 자석 바로 안쪽까지(에어갭 전체 포함)를 group0 → 로터(group1)가 group0 에어갭에 둘러싸임(응력텐서 토크 성립)
+        femm.mi_selectcircle(0, 0, Rro - 1e-3, 4); femm.mi_setgroup(0); femm.mi_clearselected()
+    else:
+        femm.mi_selectcircle(0, 0, (Rro + Rb) / 2, 4); femm.mi_setgroup(1); femm.mi_clearselected()
+    femm.mi_makeABC(5, Rbound * 1.25, 0, 0, 0)
+    label(Rbound * 1.12 * math.cos(0.06), Rbound * 1.12 * math.sin(0.06), 'Air', 0, 0, mExt)  # 외부 공기(비축)
     femm.mi_zoomnatural()
     femm.mi_saveas('mini_motorcad.fem')
 
@@ -204,7 +218,7 @@ def flux_linkage(d, sROT, p, depth_m):
     """상 p 쇄교자속[Wb] ≈ depth·Σ_i turns_i·A(슬롯중심). go(+)/ret(-) 부호로 코일자속 산출."""
     Ns = d['Ns']
     Rb, Rd = d['Rb'], d['Rb'] + d['slotDepth']
-    rr = (Rb + Rd) / 2
+    rr = d.get('_Rslotmid', (Rb + Rd) / 2)
     lam = 0.0
     for i in range(Ns):
         t = d['slotTurns'][i][p]
@@ -243,7 +257,7 @@ def solve_torque():
 
 def airgap_bn(d, npts=180):
     """에어갭 중간원에서 반경방향 자속밀도 샘플 → 피크."""
-    Rg = (d['Rro'] + d['Rb']) / 2
+    Rg = d.get('_Rairgap', (d['Rro'] + d['Rb']) / 2)
     bmax = 0.0
     for k in range(npts):
         a = 2 * math.pi * k / npts
@@ -259,8 +273,8 @@ def sample_iron(d, sROT):
     한 순간의 18개 치를 공간적으로 샘플 → 한 치가 1주기 동안 겪는 범위와 동일(대칭)."""
     Ns = d['Ns']
     Rb, Rd, Rlam = d['Rb'], d['Rb'] + d['slotDepth'], d['Rlam']
-    rt = (Rb + Rd) / 2          # 치 중간 반경
-    ry = (Rd + Rlam) / 2        # 요크(백아이언) 중간 반경
+    rt = d.get('_Rslotmid', (Rb + Rd) / 2)          # 치 중간 반경(외전형 대응)
+    ry = d.get('_Ryokemid', (Rd + Rlam) / 2)        # 요크(백아이언) 중간 반경
     bt = by = 0.0
     for i in range(Ns):
         at = sROT + (i + 0.5) * 2 * math.pi / Ns       # 치 중심(슬롯 사이)
@@ -275,7 +289,17 @@ def sample_iron(d, sROT):
 @app.route('/solve', methods=['POST'])
 def solve():
     d = request.get_json(force=True)
-    print('\n[solve] 요청 수신 — Ns=%s poles=%s  FEMM 구동 시도...' % (d.get('Ns'), d.get('poles')), flush=True)
+    # 토폴로지 샘플 반경 (외전형 대응) — flux_linkage/airgap_bn/sample_iron/iron_loss 공용
+    _o = d.get('rotorType') == 'outer'
+    _Rl, _Rb, _Rr, _sd = d['Rlam'], d['Rb'], d['Rro'], d['slotDepth']
+    _Rag = _Rl if _o else _Rb
+    _Rsb = (_Rl - _sd) if _o else (_Rb + _sd)
+    d['_Rslotmid'] = (_Rag + _Rsb) / 2
+    d['_Rairgap'] = (_Rl + _Rr) / 2 if _o else (_Rr + _Rb) / 2
+    d['_Ryokemid'] = (_Rsb + _Rb) / 2 if _o else (_Rsb + _Rl) / 2
+    d['_Rt0'], d['_Rt1'] = min(_Rag, _Rsb), max(_Rag, _Rsb)
+    d['_Ry0'], d['_Ry1'] = (min(_Rsb, _Rb), max(_Rsb, _Rb)) if _o else (min(_Rsb, _Rl), max(_Rsb, _Rl))
+    print('\n[solve] 요청 수신 — Ns=%s poles=%s  topology=%s  FEMM 구동 시도...' % (d.get('Ns'), d.get('poles'), 'outer' if _o else 'inner'), flush=True)
     with _solve_lock:                       # 동시 요청 직렬화 (FEMM 단일 인스턴스)
         pythoncom.CoInitialize()            # 이 워커 스레드에서 COM 사용 준비 (FEMM ActiveX)
         opened = False
@@ -383,23 +407,24 @@ def solve():
             ironMassB2 = 0.0
             try:
                 Rlam, Rb = d['Rlam'], d['Rb']
-                Rd = Rb + d['slotDepth']
                 Wt = float(d.get('toothWidth', (2 * math.pi * Rb / Ns) * 0.5))
                 DENS = 7650.0
+                Ry0, Ry1 = d.get('_Ry0', Rb + d['slotDepth']), d.get('_Ry1', Rlam)   # 요크 환형(외전형 대응)
+                Rt0, Rt1 = d.get('_Rt0', Rb), d.get('_Rt1', Rb + d['slotDepth'])      # 치 환형
                 samples = []                                    # (x, y, dA[mm²])
-                nr_y, na_y = 4, 6 * Ns                           # 요크 ring (Rd~Rlam, 전둘레)
+                nr_y, na_y = 4, 6 * Ns                           # 요크 ring (전둘레)
                 for ir in range(nr_y):
-                    r = Rd + (Rlam - Rd) * (ir + 0.5) / nr_y
+                    r = Ry0 + (Ry1 - Ry0) * (ir + 0.5) / nr_y
                     for ia in range(na_y):
                         a = sROT + 2 * math.pi * (ia + 0.5) / na_y
-                        dA = (Rlam - Rd) / nr_y * (2 * math.pi * r / na_y)
+                        dA = (Ry1 - Ry0) / nr_y * (2 * math.pi * r / na_y)
                         samples.append((r * math.cos(a), r * math.sin(a), dA))
-                nr_t = 5                                         # 치 (각 치 중심각, Rb~Rd, 폭 Wt)
+                nr_t = 5                                         # 치 (각 치 중심각, 폭 Wt)
                 for i in range(Ns):
                     at = sROT + (i + 0.5) * 2 * math.pi / Ns
                     for ir in range(nr_t):
-                        r = Rb + (Rd - Rb) * (ir + 0.5) / nr_t
-                        dA = Wt * (Rd - Rb) / nr_t
+                        r = Rt0 + (Rt1 - Rt0) * (ir + 0.5) / nr_t
+                        dA = Wt * (Rt1 - Rt0) / nr_t
                         samples.append((r * math.cos(at), r * math.sin(at), dA))
                 bpk = [0.0] * len(samples)
                 NT = 12
