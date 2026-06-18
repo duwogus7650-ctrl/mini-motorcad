@@ -1350,7 +1350,9 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
   const canvasRef = useRef(null), wrapRef = useRef(null), fileRef = useRef(null), aedtRef = useRef(null);
   const viewRef = useRef({ scale: 6, ox: 0, oy: 0, init: false });
   const dragRef = useRef(null);
-  const rotorDia = geo.statorBore - 2 * geo.airgap;
+  const rotorDia = geo.rotorType === "outer"
+    ? geo.statorLamDia + 2 * (geo.airgap + (geo.bandingThickness || 0) + geo.magnetThickness + (geo.rotorYoke || 0))  // 외전형: 로터 캔 외경
+    : geo.statorBore - 2 * geo.airgap;
   // DXF 형상 정합 자동검사 — 형상 관련 파라미터가 바뀔 때만 재계산.
   const fit = useMemo(() => (dxf ? fitResidual(dxf, geo) : null),
     [dxf, geo.statorBore, geo.slotDepth, geo.slotNumber, geo.toothWidth, geo.slotOpening, geo.toothTipDepth,
@@ -1398,8 +1400,12 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
 
     ctx.globalAlpha = opacity;
     const P = geo;
-    const Ro = rotorDia / 2 - P.bandingThickness, Ri = Ro - P.magnetThickness;
-    if (layers.rotor) { ctx.fillStyle = "#33CCCC"; annulus(Ri, P.shaftDia / 2); ctx.fill("evenodd"); }
+    const outer = P.rotorType === "outer";
+    const Rag = outer ? P.statorLamDia / 2 : P.statorBore / 2;
+    const Ro = outer ? Rag + P.airgap + (P.bandingThickness || 0) : Rag - P.airgap - (P.bandingThickness || 0);  // 자석 공극면
+    const Ri = outer ? Ro + P.magnetThickness : Ro - P.magnetThickness;                                          // 자석 반대면
+    const Rcan = outer ? Ri + (P.rotorYoke || 0) : 0;                                                            // 외전형 로터 캔 외경
+    if (layers.rotor) { ctx.fillStyle = "#33CCCC"; annulus(outer ? Rcan : Ri, outer ? Ri : P.shaftDia / 2); ctx.fill("evenodd"); }
     if (layers.magnets && P.poleNumber > 0) {
       const mp = buildMagnetPath(P); ctx.fillStyle = "#22BB22";
       for (let k = 0; k < P.poleNumber; k++) { poly(rotPts(mp, P.rotorRot * D2R + (k * 2 * Math.PI) / P.poleNumber), true); ctx.fill(); }
@@ -1415,7 +1421,7 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
     ctx.globalAlpha = 1;
     ctx.strokeStyle = "#B02020"; ctx.lineWidth = 1.2;
     if (layers.stator) { circle(P.statorLamDia / 2); ctx.stroke(); circle(P.statorBore / 2); ctx.stroke(); }
-    if (layers.rotor) { ctx.strokeStyle = "#0E8C8C"; circle(Ro); ctx.stroke(); circle(Ri); ctx.stroke(); circle(P.shaftDia / 2); ctx.stroke(); }
+    if (layers.rotor) { ctx.strokeStyle = "#0E8C8C"; circle(Ro); ctx.stroke(); circle(Ri); ctx.stroke(); circle(outer ? Rcan : P.shaftDia / 2); ctx.stroke(); }
 
     if (dxf && layers.dxf) {
       ctx.save();
@@ -1479,7 +1485,7 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
     const wrap = wrapRef.current; if (!wrap) return;
     const V = viewRef.current;
     V.ox = wrap.clientWidth / 2; V.oy = wrap.clientHeight / 2;
-    V.scale = Math.min(wrap.clientWidth, wrap.clientHeight) / (geo.statorLamDia * 1.15);
+    V.scale = Math.min(wrap.clientWidth, wrap.clientHeight) / (Math.max(geo.statorLamDia, rotorDia) * 1.15);   // 외전형 로터 캔 포함
     draw();
   };
   const autoPendingRef = useRef(false);
