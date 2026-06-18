@@ -379,7 +379,7 @@ function parseAedt(text) {
   const N_slot = V("N_slot", "Slots"), N_pole = V("N_pole", "Poles"), a_m = V("a_m", "Embrace");
   const D_si = V("D_si") ?? (D_ro !== undefined && g !== undefined ? D_ro + 2 * g : undefined);
   const offset = V("Magnet_R_Offset", "MagOffset");
-  const geo = {}, wind = {}, applied = [], missing = [];
+  const geo = {}, wind = {}, applied = [], missing = [], warnings = [];
   const set = (obj, k, v, label) => { if (v !== undefined && isFinite(v)) { obj[k] = +v.toFixed(3); applied.push(label || k); } else missing.push(label || k); };
 
   set(geo, "statorLamDia", D_so, "statorLamDia(D_so)");
@@ -444,7 +444,10 @@ function parseAedt(text) {
     } catch (e) { /* 형상 불완전 시 와이어 유지 */ }
   }
 
-  return { geo, wind, applied, missing, varCount: Object.keys(vars).length };
+  // 외전형(아우터로터) 감지: D_ro>D_so 면 로터가 스테이터 바깥 → 내전형 가정 모델과 형상 모순.
+  if (D_ro !== undefined && D_so !== undefined && D_ro > D_so)
+    warnings.push("외전형(아우터로터: D_ro>D_so) 감지 — 이 앱은 내전형만 모델링하므로 추출 형상이 부정확합니다.");
+  return { geo, wind, applied, missing, warnings, varCount: Object.keys(vars).length };
 }
 
 // ─── 형상 생성 ───────────────────────────────────────────────────
@@ -1572,6 +1575,7 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
               <div className="truncate" style={{ color: "#1B7A2B" }}>{aedtInfo.name}</div>
               <div style={{ color: UI.text }}>적용 {aedtInfo.applied.length}개: {aedtInfo.applied.join(" · ")}</div>
               {aedtInfo.missing.length > 0 && <div style={{ color: "#B5622D" }}>미발견 {aedtInfo.missing.length}개: {aedtInfo.missing.join(" · ")}</div>}
+              {aedtInfo.warnings && aedtInfo.warnings.length > 0 && aedtInfo.warnings.map((w, i) => <div key={i} style={{ color: "#ff6b6b", fontWeight: 600 }}>⚠ {w}</div>)}
             </div>
           )}
           {dxf && (
