@@ -113,3 +113,17 @@
 - parseAedt는 내전형(D_si=D_ro+2g) 가정이라 외전형이면 statorBore>statorLamDia로 **조용히 잘못 추출**됨
   → parseAedt에 D_ro>D_so 외전형 감지 경고 추가(임포트 UI·verify 표시). 일괄검증이 이 조용한 오류를 잡아냄.
   교훈: 임포터는 가정(토폴로지)을 벗어나는 입력을 조용히 처리하지 말고 감지·경고할 것.
+
+## 2026-06-18 (이어서5) — 외전형(아우터로터) 지원 ① 임포트+형상+compute
+
+- **핵심 통찰: 외전형 형상 = 내전형을 외경원(Rag=statorLamDia/2)에 대해 반경반사(R→2·Rag−R)** 한 것.
+  검증된 내전형 빌더를 그대로 재사용(reflectOuter)해 공극면 폭·치 형상이 자동 보존 → 위험 최소화.
+  (슬롯/자석 R범위 OuterType [30.85,40.40]/[40.70,42.80] 정확.)
+- compute()에 토폴로지 반경(Rag·Rsb·Rback·Rt·Ry·Dair, magAg/magBack) 도입. **내전형 값은 수학적으로
+  동일** → 무회귀(1250W·400W 전부 불변 재확인). 외전형: 공극면=외경, 요크=내측 환형, 자석·백아이언=바깥캔.
+- parseAedt: D_ro>D_so 면 rotorType=outer, statorBore=D_shaft(내경 마운팅홀), rotorYoke=T_rotorYoke.
+  slotDepth 공식(D_so/2−T_Yoke−D_si/2)은 대칭이라 그대로 외전형 정답. 톱니팁각·자석면취는 내전형
+  가정식이라 외전형선 미반영(근사, 안내 표시).
+- 검증: 사용자 .aedt 11개 **전부 임포트+형상+compute 🟢**(외전형 OuterType 30S32P·SPG_X12 36S40P 포함).
+  eval 추출 도구는 reflectOuter도 추출해야 함(앱 본체는 정상인데 verify에서 ReferenceError였음).
+  남은 단계: 렌더(GeometryTab/SlotViewer 외전형 그리기)·FEMM 외전형 빌드.

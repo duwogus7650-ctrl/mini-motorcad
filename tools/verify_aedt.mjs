@@ -9,6 +9,7 @@ globalThis.D2R = Math.PI / 180; globalThis.MU0 = 4 * Math.PI * 1e-7;
 eval(slice("const STEELS = {", "const MAGNETS = {").replace("const STEELS =", "globalThis.STEELS ="));
 eval(slice("const MAGNETS = {", "const WIRE_TABLES").replace("const MAGNETS =", "globalThis.MAGNETS ="));
 eval(slice("const shoelace =", "// ─── DXF 형상 정합").replace("const shoelace =", "globalThis.shoelace ="));
+eval(slice("const reflectOuter =", "function buildSlotPath").replace("const reflectOuter =", "globalThis.reflectOuter ="));
 eval(slice("function buildSlotPath(P) {", "function buildMagnetPath(P) {").replace("function buildSlotPath", "globalThis.buildSlotPath = function buildSlotPath"));
 eval(slice("function buildMagnetPath(P) {", "const rotPts").replace("function buildMagnetPath", "globalThis.buildMagnetPath = function buildMagnetPath"));
 eval(slice("function windingAnalysis(Ns, poles, throw_, Nc) {", "const STEELS = {").replace("function windingAnalysis", "globalThis.windingAnalysis = function windingAnalysis"));
@@ -40,6 +41,7 @@ for (const fp of files) {
   if (!r) { console.log(`\n🔴 ${name}\n   설계변수(VariableProp) 0개 — Maxwell .aedt 아니거나 다른 형식`); fail++; summary.push([name, "🔴", "변수없음"]); continue; }
 
   const g = r.geo;
+  const outer = g.rotorType === "outer";
   const missCrit = CRIT.filter(([k]) => !fin(g[k]));
   // 일관성 검사 (추출된 값만)
   const chk = [];
@@ -49,8 +51,8 @@ for (const fp of files) {
   if (fin(g.slotNumber)) c(Number.isInteger(g.slotNumber) && g.slotNumber >= 3 && g.slotNumber <= 90, `슬롯${g.slotNumber}`, `슬롯${g.slotNumber}`);
   if (fin(g.poleNumber)) c(Number.isInteger(g.poleNumber) && g.poleNumber % 2 === 0 && g.poleNumber >= 2, `극${g.poleNumber}`, `극${g.poleNumber}(홀수?)`);
   if (fin(g.magnetArcED)) c(g.magnetArcED > 20 && g.magnetArcED <= 180, "자석호", `자석호${g.magnetArcED}`);
-  if (fin(g.statorBore) && fin(g.airgap) && fin(g.shaftDia)) { const rotOD = g.statorBore - 2 * g.airgap; c(rotOD > g.shaftDia, "로터>샤프트", `로터${rotOD.toFixed(1)}≤샤프트${g.shaftDia}`); }
-  if (fin(g.toothWidth) && fin(g.statorBore) && fin(g.slotNumber)) { const pitch = Math.PI * g.statorBore / g.slotNumber; c(g.toothWidth > 0 && g.toothWidth < pitch, "톱니<피치", `톱니${g.toothWidth}≥피치${pitch.toFixed(1)}`); }
+  if (!outer && fin(g.statorBore) && fin(g.airgap) && fin(g.shaftDia)) { const rotOD = g.statorBore - 2 * g.airgap; c(rotOD > g.shaftDia, "로터>샤프트", `로터${rotOD.toFixed(1)}≤샤프트${g.shaftDia}`); }
+  if (fin(g.toothWidth) && fin(g.slotNumber)) { const Rag2 = (outer ? g.statorLamDia : g.statorBore); const pitch = Math.PI * Rag2 / g.slotNumber; c(g.toothWidth > 0 && g.toothWidth < pitch, "톱니<피치", `톱니${g.toothWidth}≥피치${pitch.toFixed(1)}`); }
   const badChk = chk.filter((x) => x.startsWith("✗"));
 
   // 형상 생성 + compute (누락은 GEO0/WIND0 기본값으로 보완해 시도)
@@ -67,7 +69,7 @@ for (const fp of files) {
   if (ok) pass++; else if (mark === "🟡") partial++; else fail++;
 
   console.log(`\n${mark} ${name}  (${r.varCount}변수, 적용 ${r.applied.length})`);
-  console.log(`   사양: ${fin(g.slotNumber) ? g.slotNumber + "슬롯" : "슬롯?"}/${fin(g.poleNumber) ? g.poleNumber + "극" : "극?"}  외경${fin(g.statorLamDia) ? g.statorLamDia : "?"} 보어${fin(g.statorBore) ? g.statorBore : "?"} 에어갭${fin(g.airgap) ? g.airgap : "?"} 자석t${fin(g.magnetThickness) ? g.magnetThickness : "?"} 축장${fin(g.stackLength) ? g.stackLength : "?"}`);
+  console.log(`   사양: ${outer ? "[외전형] " : ""}${fin(g.slotNumber) ? g.slotNumber + "슬롯" : "슬롯?"}/${fin(g.poleNumber) ? g.poleNumber + "극" : "극?"}  외경${fin(g.statorLamDia) ? g.statorLamDia : "?"} 보어${fin(g.statorBore) ? g.statorBore : "?"} 에어갭${fin(g.airgap) ? g.airgap : "?"} 자석t${fin(g.magnetThickness) ? g.magnetThickness : "?"} 축장${fin(g.stackLength) ? g.stackLength : "?"}`);
   if (missCrit.length) console.log(`   ⚠ 미추출(핵심): ${missCrit.map(([, l]) => l).join("·")}`);
   if (r.missing.length) console.log(`   미발견: ${r.missing.join(" · ")}`);
   console.log(`   일관성: ${chk.length ? chk.join(" ") : "(검사할 값 부족)"}`);

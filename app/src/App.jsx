@@ -377,14 +377,17 @@ function parseAedt(text) {
 
   const D_ro = V("D_ro"), T_m = V("T_m"), g = V("g"), D_so = V("D_so"), T_Yoke = V("T_Yoke");
   const N_slot = V("N_slot", "Slots"), N_pole = V("N_pole", "Poles"), a_m = V("a_m", "Embrace");
-  const D_si = V("D_si") ?? (D_ro !== undefined && g !== undefined ? D_ro + 2 * g : undefined);
+  const D_shaft = V("D_shaft", "D_sh"), rotorYoke = V("T_rotorYoke", "T_RotorYoke", "T_Yoke_Rotor");
+  // 외전형(아우터로터): 로터 외경 D_ro > 스테이터 외경 D_so. 스테이터 보어=내경 마운팅홀(D_shaft).
+  const outer = D_ro !== undefined && D_so !== undefined && D_ro > D_so;
+  const D_si = outer ? (V("D_si") ?? D_shaft) : (V("D_si") ?? (D_ro !== undefined && g !== undefined ? D_ro + 2 * g : undefined));
   const offset = V("Magnet_R_Offset", "MagOffset");
   const geo = {}, wind = {}, applied = [], missing = [], warnings = [];
   const set = (obj, k, v, label) => { if (v !== undefined && isFinite(v)) { obj[k] = +v.toFixed(3); applied.push(label || k); } else missing.push(label || k); };
 
   set(geo, "statorLamDia", D_so, "statorLamDia(D_so)");
   set(geo, "statorBore", D_si, "statorBore(D_si)");
-  set(geo, "airgap", g ?? (D_si !== undefined && D_ro !== undefined ? (D_si - D_ro) / 2 : undefined), "airgap(g)");
+  set(geo, "airgap", g ?? (!outer && D_si !== undefined && D_ro !== undefined ? (D_si - D_ro) / 2 : undefined), "airgap(g)");
   set(geo, "shaftDia", V("D_shaft", "D_sh"), "shaftDia(D_shaft)");
   set(geo, "slotNumber", N_slot !== undefined ? Math.round(N_slot) : undefined, "slotNumber(N_slot)");
   set(geo, "poleNumber", N_pole !== undefined ? Math.round(N_pole) : undefined, "poleNumber(N_pole)");
@@ -395,7 +398,7 @@ function parseAedt(text) {
   // 톱니팁 테이퍼각: 직선개구(d_1) 끝 A2에서 톱니측면(반경 R3=보어+d_1+d_2)까지의 각도.
   // 이렇게 두면 모델 buildSlotPath의 A3가 정확히 R3에 떨어져 Maxwell d_1·d_2 구성과 일치.
   let toothTipAngle;
-  if ([D_si, N_slot, W_t, W_so, d_1, d_2].every((x) => x !== undefined)) {
+  if (!outer && [D_si, N_slot, W_t, W_so, d_1, d_2].every((x) => x !== undefined)) {
     const Rb = D_si / 2, halfOp = W_so / 2, x1 = Math.sqrt(Math.max(Rb * Rb - halfOp * halfOp, 0));
     const A2x = x1 + d_1, A2y = halfOp, dlt = Math.PI / N_slot;
     const R3 = Rb + d_1 + d_2, t = Math.sqrt(Math.max(R3 * R3 - (W_t / 2) ** 2, 0));
@@ -411,7 +414,7 @@ function parseAedt(text) {
   set(geo, "magnetArcED", a_m !== undefined ? Math.min(180, a_m * 180) : undefined, "magnetArcED(a_m×180)");
   // 자석 R 면취: 외측호 오프셋(Magnet_R_Offset)에서 모델 정의(Ro−hypot(xe,W2))로 환산.
   let reduction;
-  if ([D_ro, T_m, N_pole, a_m, offset].every((x) => x !== undefined)) {
+  if (!outer && [D_ro, T_m, N_pole, a_m, offset].every((x) => x !== undefined)) {
     const Ro = D_ro / 2, Ri = Ro - T_m, halfA = (a_m * 180 / N_pole) * D2Rl, W2 = Ri * Math.sin(halfA), Ra = Ro - offset;
     if (Ra > W2 && offset >= 0 && offset < Ro) reduction = Math.max(0, Ro - Math.hypot(offset + Math.sqrt(Ra * Ra - W2 * W2), W2));
   }
@@ -445,13 +448,25 @@ function parseAedt(text) {
   }
 
   // 외전형(아우터로터) 감지: D_ro>D_so 면 로터가 스테이터 바깥 → 내전형 가정 모델과 형상 모순.
-  if (D_ro !== undefined && D_so !== undefined && D_ro > D_so)
-    warnings.push("외전형(아우터로터: D_ro>D_so) 감지 — 이 앱은 내전형만 모델링하므로 추출 형상이 부정확합니다.");
+  if (outer) {
+    geo.rotorType = "outer";
+    if (rotorYoke !== undefined) geo.rotorYoke = +rotorYoke.toFixed(3);
+    applied.push("외전형(rotorType=outer)" + (rotorYoke !== undefined ? "+로터백아이언(T_rotorYoke)" : ""));
+    warnings.push("외전형(아우터로터) 모델 적용 — 공극면=외경·자석 바깥. 톱니팁각·자석면취는 미반영(근사).");
+  } else geo.rotorType = "inner";
   return { geo, wind, applied, missing, warnings, varCount: Object.keys(vars).length };
 }
 
 // ─── 형상 생성 ───────────────────────────────────────────────────
+// 외전형(아우터로터): 공극면이 외경(statorLamDia). 내전형 형상을 외경반경에서 만들어
+// 외경원 R→2·Rag−R 로 안쪽으로 반사 = 외전형 슬롯/자석(공극면 폭·치 형상 보존, 검증된 빌더 재사용).
+const reflectOuter = (P, fn) => {
+  const Rag = P.statorLamDia / 2;
+  return fn({ ...P, rotorType: "inner", statorBore: P.statorLamDia })
+    .map(([x, y]) => { const R = Math.hypot(x, y) || 1e-9, k = (2 * Rag - R) / R; return [x * k, y * k]; });
+};
 function buildSlotPath(P) {
+  if (P.rotorType === "outer") return reflectOuter(P, buildSlotPath);
   const Rb = P.statorBore / 2, Rd = Rb + P.slotDepth, halfOp = P.slotOpening / 2;
   const tta = P.toothTipAngle * D2R, dlt = Math.PI / P.slotNumber;
   const x1 = Math.sqrt(Math.max(Rb * Rb - halfOp * halfOp, 0));
@@ -486,6 +501,7 @@ function buildSlotPath(P) {
   return pts;
 }
 function buildMagnetPath(P) {
+  if (P.rotorType === "outer") return reflectOuter(P, buildMagnetPath);
   const Ro = (P.statorBore - 2 * P.airgap) / 2 - P.bandingThickness;
   const Ri = Ro - P.magnetThickness;
   const pp = P.poleNumber / 2;
@@ -657,12 +673,20 @@ function compute(G, W, M, C, cal) {
   const out = {};
   const Ns = G.slotNumber, poles = G.poleNumber, pp = poles / 2;
   const Bore = G.statorBore, g = G.airgap, lm = G.magnetThickness;
+  // ── 토폴로지(내전형/외전형) 반경 ── 외전형은 공극면이 외경(statorLamDia), 로터가 바깥.
+  const outer = G.rotorType === "outer";
+  const Rag = outer ? G.statorLamDia / 2 : Bore / 2;            // 공극면(슬롯 개구) 반경
+  const Rsb = outer ? Rag - G.slotDepth : Rag + G.slotDepth;    // 슬롯 바닥
+  const Rback = outer ? Bore / 2 : G.statorLamDia / 2;          // 스테이터 반대편(요크 끝)
+  const Rt0 = Math.min(Rag, Rsb), Rt1 = Math.max(Rag, Rsb);    // 치 환형
+  const Ry0 = Math.min(Rsb, Rback), Ry1 = Math.max(Rsb, Rback);// 요크 환형
+  const Dair = 2 * Rag + (outer ? g : -g);                     // 평균 공극 지름
   const mag = { ...MAGNETS[M.magnet], Br20: M.Br20, tc: M.tcBr, mur: M.mur };
   const stl = { ...STEELS[M.steel], kh: M.kh, ke: M.ke };
 
   // 자석/공극
   const Br = mag.Br20 * (1 + mag.tc / 100 * (C.Tmag - 20));
-  const taus = Math.PI * Bore / Ns;
+  const taus = Math.PI * 2 * Rag / Ns;   // 공극면 슬롯피치 (외전형은 외경 기준)
   const gam = (G.slotOpening / g) ** 2 / (5 + G.slotOpening / g);
   const kc = taus / (taus - gam * g);
   const Bgpk = Br * lm / (lm + mag.mur * kc * g);
@@ -678,7 +702,7 @@ function compute(G, W, M, C, cal) {
   out.condPerSlot = 2 * W.turnsPerCoil * W.strands; // 2층
 
   // 쇄교자속 / EMF / 토크
-  const D = Bore - g, taup = Math.PI * D / poles;
+  const D = Dair, taup = Math.PI * D / poles;
   const alpha = G.magnetArcED / 180;
   const L = G.magneticLength * 1e-3;
   // 쇄교자속 λ — FEMM 보정이 적용되면 FEMM에서 측정한 λ(=Ke/pp)를 그대로 사용.
@@ -717,7 +741,7 @@ function compute(G, W, M, C, cal) {
   out.turnCSA = cuA * W.strands;
 
   // MLT / 저항 / 동손
-  const tausMid = Math.PI * (Bore + G.slotDepth) / Ns;
+  const tausMid = Math.PI * (Rt0 + Rt1) / Ns;   // 슬롯 평균반경 피치(외전형 대응)
   const slotWMid = tausMid - G.toothWidth;
   out.coilPitch = W.throw * tausMid - slotWMid / 2;
   out.MLT = 2 * G.stackLength + Math.PI * out.coilPitch;
@@ -757,7 +781,7 @@ function compute(G, W, M, C, cal) {
   // 자속밀도 (FSCW 보정)
   // 치·요크 자속밀도 — FEMM 보정 시 FEMM 측정값 사용(철손이 FEMM 기반이 됨), 아니면 해석식.
   const BtAnalytic = C.cT * Bgpk * taus / G.toothWidth;
-  const byDepth = G.statorLamDia / 2 - Bore / 2 - G.slotDepth;
+  const byDepth = Ry1 - Ry0;   // 요크 반경깊이(토폴로지 무관: 슬롯반대편)
   out.byDepth = byDepth;
   const ByAnalytic = BtAnalytic * G.toothWidth / (2 * Math.max(byDepth, 0.1));   // 백아이언 깊이≤0 가드
   out.Bt = (cal && Number.isFinite(cal.Bt)) ? cal.Bt : BtAnalytic;
@@ -766,14 +790,18 @@ function compute(G, W, M, C, cal) {
   // 중량
   const Lstk = G.stackLength;
   const rhoFe = stl.density * 1e-9, rhoMag = mag.density * 1e-9;
-  const Rb = Bore / 2, RdS = Rb + G.slotDepth, RoL = G.statorLamDia / 2;
-  const toothArea = Math.PI * (RdS ** 2 - Rb ** 2) - Ns * slotA;
-  const byArea = Math.PI * (RoL ** 2 - RdS ** 2);
+  const toothArea = Math.PI * (Rt1 ** 2 - Rt0 ** 2) - Ns * slotA;
+  const byArea = Math.PI * (Ry1 ** 2 - Ry0 ** 2);
   out.mTooth = toothArea * Lstk * rhoFe;
   out.mBy = byArea * Lstk * rhoFe;
   out.mStator = out.mTooth + out.mBy;
-  const RoM = (Bore - 2 * g) / 2 - G.bandingThickness, RiM = RoM - lm;
-  out.mRotor = Math.PI * (RiM ** 2 - (G.shaftDia / 2) ** 2) * G.rotorLamLength * rhoFe;
+  // 자석/회전자 반경 (외전형은 자석이 스테이터 바깥, 백아이언이 자석 바깥 캔)
+  const magAg = outer ? Rag + g + G.bandingThickness : Rag - g - G.bandingThickness;  // 자석 공극면
+  const magBack = outer ? magAg + lm : magAg - lm;                                      // 자석 반대면
+  const RoM = magAg, RiM = magBack;
+  out.mRotor = outer
+    ? Math.PI * ((magBack + (G.rotorYoke || 0)) ** 2 - magBack ** 2) * G.rotorLamLength * rhoFe   // 외전형 백아이언 캔
+    : Math.PI * (magBack ** 2 - (G.shaftDia / 2) ** 2) * G.rotorLamLength * rhoFe;                 // 내전형 로터코어
   // 자석 질량 — 실제 그려지는 빵덩어리(면취) 단면적(shoelace)으로 계산해 형상과 일치.
   // magnetReduction(면취량)이 형상·질량 양쪽에 일관 반영됨. (REF 0.1428 은 MC 자석모델 차이)
   const magArea = Math.abs(shoelace(buildMagnetPath(G)));   // mm² (1극 자석 단면)
@@ -882,6 +910,7 @@ const GEO0 = {
   slotDepth: 14.2, toothTipDepth: 0.5, slotOpening: 0.56, toothTipAngle: 4,
   poleNumber: 16, magnetThickness: 3.6, magnetReduction: 1.3, magnetArcED: 145,
   airgap: 0.5, bandingThickness: 0, shaftDia: 62, statorRot: 0, rotorRot: 0, slotBottomShape: "arc",
+  rotorType: "inner", rotorYoke: 0,
   stackLength: 30, magnetLength: 30, rotorLamLength: 30, magneticLength: 27.9, motorLength: 70,
 };
 const WIND0 = {
