@@ -787,8 +787,9 @@ function compute(G, W, M, C, cal) {
   out.PcuAC = out.Pcu * out.RacRdc;        // 총 동손(AC 포함)
   out.PcuAddl = out.Pcu * (out.RacRdc - 1); // AC 추가분
 
-  // 철손 / 효율
-  out.Pfe = (stl.kh * fe + stl.ke * fe ** 2) * (out.mTooth * out.Bt ** 2 + out.mBy * out.By ** 2);
+  // 철손 / 효율 — cFe: 단순 Steinmetz(peak-B²)는 고B·후막 적층서 FEA/실측 대비 과대 → 모터별 보정(기본 1).
+  const cFe = Number.isFinite(C.cFe) ? C.cFe : 1;
+  out.Pfe = cFe * (stl.kh * fe + stl.ke * fe ** 2) * (out.mTooth * out.Bt ** 2 + out.mBy * out.By ** 2);
   const wm = C.speed * 2 * Math.PI / 60;
   out.Pem = out.torque * wm;
   out.Pin = out.Pem + out.PcuAC;
@@ -864,8 +865,8 @@ function compute(G, W, M, C, cal) {
   out.Tstall = out.KtLine * out.Istall;
   out.numLam = G.magneticLength / stl.thk;
   const S_fe = out.mTooth * out.Bt ** 2 + out.mBy * out.By ** 2;
-  out.PfeHyst = stl.kh * fe * S_fe;
-  out.PfeEddy = stl.ke * fe ** 2 * S_fe;
+  out.PfeHyst = cFe * stl.kh * fe * S_fe;
+  out.PfeEddy = cFe * stl.ke * fe ** 2 * S_fe;
   out.phaseLen = out.MLT * (wa.coilsPerPhase * W.turnsPerCoil);
   out.mCuActive = out.turnCSA * 1e-6 * (2 * G.stackLength * 1e-3 * out.turnsPerPhase) * 3 * 8933;
   out.mCuEwdg = (out.mCopper - out.mCuActive) / 2;
@@ -886,7 +887,7 @@ const WIND0 = {
   wedgeDepth: 1.0, condSep: 0.02, wedgeModel: "wedge",
 };
 const MAT0 = { steel: "20PNX1200F", magnet: "N45UH", Br20: 1.32, tcBr: -0.12, mur: 1.05, kh: 0.0212, ke: 4.157e-5 };
-const CALC0 = { speed: 3200, Vdc: 48, IlineRms: 24.8, phaseAdv: 0, Tcu: 80, Tmag: 80, klk: 0.97, cT: 0.56, cL: 2.6, cLs: 0.33, cAC: 1.0, otherLoss: 6.7, currentDef: "rms", magnetisation: "parallel", driveMode: "sine" };
+const CALC0 = { speed: 3200, Vdc: 48, IlineRms: 24.8, phaseAdv: 0, Tcu: 80, Tmag: 80, klk: 0.97, cT: 0.56, cL: 2.6, cLs: 0.33, cAC: 1.0, cFe: 1.0, otherLoss: 6.7, currentDef: "rms", magnetisation: "parallel", driveMode: "sine" };
 
 // 1250W-jk Motor-CAD 참조값 (비교 표시용)
 const REF = {
@@ -2185,6 +2186,7 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
           <NumIn label="인덕턴스 보정 cL" value={calc.cL} step={0.1} onChange={(v) => sC("cL", v)} />
           <NumIn label="슬롯누설 보정 cLs" value={calc.cLs} step={0.01} onChange={(v) => sC("cLs", v)} />
           <NumIn label="AC 동손 보정 cAC" value={calc.cAC} step={0.1} onChange={(v) => sC("cAC", v)} />
+          <NumIn label="철손 보정 cFe (FEA/측정)" value={calc.cFe} step={0.05} onChange={(v) => sC("cFe", v)} />
           <NumIn label="기타 손실 [W]" value={calc.otherLoss} step={0.5} onChange={(v) => sC("otherLoss", v)} />
           <div className="px-2 py-1 text-xs" style={{ color: "#7e8eac" }}>기본값은 1250W-jk FEA 캘리브레이션. 토폴로지가 다르면 재조정.</div>
         </Box>
