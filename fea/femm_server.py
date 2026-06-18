@@ -377,6 +377,51 @@ def solve():
             avgT = sum(loadT) / len(loadT)
             ripT = (max(loadT) - min(loadT)) / abs(avgT) * 100 if abs(avgT) > 1e-6 else 0.0
 
+            # 2b) 고정자 철손 B²·질량 적분 — 전기 1주기(=360/pp 기계도) 시간스텝 + 치/요크 공간격자 샘플.
+            # 각 점의 Bpk(주기 최대)로 Σ Bpk²·mass[kg·T²]. 앱이 (kh·f+ke·f²)·이값 = FEA 철손.
+            # 공간분포(첨두 아님)를 반영 → 앱의 "peak²×전질량" 과대평가를 cFe로 자동 보정.
+            ironMassB2 = 0.0
+            try:
+                Rlam, Rb = d['Rlam'], d['Rb']
+                Rd = Rb + d['slotDepth']
+                Wt = float(d.get('toothWidth', (2 * math.pi * Rb / Ns) * 0.5))
+                DENS = 7650.0
+                samples = []                                    # (x, y, dA[mm²])
+                nr_y, na_y = 4, 6 * Ns                           # 요크 ring (Rd~Rlam, 전둘레)
+                for ir in range(nr_y):
+                    r = Rd + (Rlam - Rd) * (ir + 0.5) / nr_y
+                    for ia in range(na_y):
+                        a = sROT + 2 * math.pi * (ia + 0.5) / na_y
+                        dA = (Rlam - Rd) / nr_y * (2 * math.pi * r / na_y)
+                        samples.append((r * math.cos(a), r * math.sin(a), dA))
+                nr_t = 5                                         # 치 (각 치 중심각, Rb~Rd, 폭 Wt)
+                for i in range(Ns):
+                    at = sROT + (i + 0.5) * 2 * math.pi / Ns
+                    for ir in range(nr_t):
+                        r = Rb + (Rd - Rb) * (ir + 0.5) / nr_t
+                        dA = Wt * (Rd - Rb) / nr_t
+                        samples.append((r * math.cos(at), r * math.sin(at), dA))
+                bpk = [0.0] * len(samples)
+                NT = 12
+                elecMech = 360.0 / pp
+                for s in range(NT):
+                    ang = elecMech * s / NT
+                    set_rotor(ang)
+                    ia, ib, ic = field_currents(ang)
+                    set_currents(d, ia, ib, ic)
+                    femm.mi_analyze(0); femm.mi_loadsolution()
+                    for k, sm in enumerate(samples):
+                        bx, by = femm.mo_getb(sm[0], sm[1])
+                        b = math.hypot(bx, by)
+                        if b > bpk[k]:
+                            bpk[k] = b
+                for k, sm in enumerate(samples):
+                    mass = sm[2] * 1e-6 * depth_m * DENS         # kg
+                    ironMassB2 += mass * bpk[k] ** 2             # kg·T²
+                print('[solve] 철손 B²질량적분 %.5f kg·T²  (%d점 × %d스텝)' % (ironMassB2, len(samples), NT), flush=True)
+            except Exception as e:
+                print('[solve] 철손적분 건너뜀:', e, flush=True)
+
             # 3) 코깅 (무전류, cogPeriod 1주기)
             cogT = []
             set_currents(d, 0, 0, 0)
@@ -395,7 +440,7 @@ def solve():
                   % (avgT, ripT, cogPP, Bg, Ke, BtFea, ByFea), flush=True)
             return jsonify(ok=True, avgTorque=avgT, torqueRipple=ripT,
                            coggingPP=cogPP, Bg=Bg, Ke=Ke, BEMFpk=BEMFpk,
-                           Bt=BtFea, By=ByFea, Ld=Ld, Lq=Lq,
+                           Bt=BtFea, By=ByFea, Ld=Ld, Lq=Lq, ironMassB2=ironMassB2,
                            loadT=loadT, cogT=cogT,
                            psiDeg=[math.degrees(x) for x in psi])
         except Exception as e:

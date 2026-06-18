@@ -788,7 +788,7 @@ function compute(G, W, M, C, cal) {
   out.PcuAddl = out.Pcu * (out.RacRdc - 1); // AC 추가분
 
   // 철손 / 효율 — cFe: 단순 Steinmetz(peak-B²)는 고B·후막 적층서 FEA/실측 대비 과대 → 모터별 보정(기본 1).
-  const cFe = Number.isFinite(C.cFe) ? C.cFe : 1;
+  const cFe = (cal && Number.isFinite(cal.cFe)) ? cal.cFe : (Number.isFinite(C.cFe) ? C.cFe : 1);  // FEMM 철손적분 보정 우선
   out.Pfe = cFe * (stl.kh * fe + stl.ke * fe ** 2) * (out.mTooth * out.Bt ** 2 + out.mBy * out.By ** 2);
   const wm = C.speed * 2 * Math.PI / 60;
   out.Pem = out.torque * wm;
@@ -2102,7 +2102,7 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
     const Rb = geo.statorBore / 2, Rro = (geo.statorBore - 2 * geo.airgap) / 2;
     const payload = {
       Ns: geo.slotNumber, poles: geo.poleNumber, statorRot: geo.statorRot, rotorRot: geo.rotorRot,
-      depth: geo.magneticLength, slotDepth: geo.slotDepth,    // 2D FEA 깊이 = 유효 자기길이(해석식 lam과 일치)
+      depth: geo.magneticLength, slotDepth: geo.slotDepth, toothWidth: geo.toothWidth,    // 2D FEA 깊이 = 유효 자기길이 / 철손샘플용 톱니폭
       Rlam: geo.statorLamDia / 2, Rb, Rro, Rmi: Rro - geo.magnetThickness, Rsh: geo.shaftDia / 2,
       slotPoly: buildSlotPath(geo), magnetPoly: buildMagnetPath(geo), slotTurns: res.wa.table,
       Ipk: res.IphRms * Math.SQRT2, Br: res.Br_used, slotArea: res.slotArea,
@@ -2243,6 +2243,9 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
               {Number.isFinite(femmRes.BEMFpk) && <Row label="무부하 역기전력 피크 (FEA)" value={femmRes.BEMFpk.toFixed(2)} unit="V" />}
               {Number.isFinite(femmRes.Bt) && <Row label="치 자속밀도 (FEA, 부하)" value={femmRes.Bt.toFixed(3)} unit="T" />}
               {Number.isFinite(femmRes.By) && <Row label="요크 자속밀도 (FEA, 부하)" value={femmRes.By.toFixed(3)} unit="T" />}
+              {Number.isFinite(femmRes.ironMassB2) && femmRes.ironMassB2 > 0 && res.mTooth > 0 && (
+                <Row label="철손 보정 cFe (FEA 적분/앱 첨두)" value={(femmRes.ironMassB2 / (res.mTooth * femmRes.Bt ** 2 + res.mBy * femmRes.By ** 2)).toFixed(3)} unit="" />
+              )}
               {Number.isFinite(femmRes.Ld) && femmRes.Ld > 0 && <Row label="d축 인덕턴스 Ld (FEA)" value={femmRes.Ld.toFixed(4)} unit="mH" />}
               {Number.isFinite(femmRes.Lq) && femmRes.Lq > 0 && <Row label="q축 인덕턴스 Lq (FEA)" value={femmRes.Lq.toFixed(4)} unit="mH" />}
               <tr><td colSpan={3} style={{ borderTop: "1px solid #22304d" }} /></tr>
@@ -2257,14 +2260,17 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
                 {femmCal ? (
                   <button onClick={() => setFemmCal(null)} className="w-full py-2 rounded text-xs font-semibold"
                     style={{ border: "1px solid #f5a524", background: "rgba(245,165,36,0.12)", color: "#f5a524" }}>
-                    ✓ FEMM 보정 적용중 (λ={femmCal.lam.toFixed(4)}, kT={femmCal.kT ? femmCal.kT.toFixed(3) : "—"}) — 클릭하면 해제
+                    ✓ FEMM 보정 적용중 (λ={femmCal.lam.toFixed(4)}, kT={femmCal.kT ? femmCal.kT.toFixed(3) : "—"}, cFe={femmCal.cFe ? femmCal.cFe.toFixed(2) : "—"}) — 클릭하면 해제
                   </button>
                 ) : (
                   <button onClick={() => {
                     const lamF = femmRes.Ke / res.pp;
                     const Tlam = 1.5 * res.pp * lamF * (res.IphRms * Math.SQRT2) * Math.cos(calc.phaseAdv * D2R);
                     const kT = (Math.abs(Tlam) > 1e-3 && Number.isFinite(femmRes.avgTorque)) ? femmRes.avgTorque / Tlam : 1;
-                    setFemmCal({ lam: lamF, ke: femmRes.Ke, kT, torqueFea: femmRes.avgTorque,
+                    const Bdenom = res.mTooth * femmRes.Bt ** 2 + res.mBy * femmRes.By ** 2;   // 앱 철손식 peak²·질량합
+                    const cFe = (Number.isFinite(femmRes.ironMassB2) && femmRes.ironMassB2 > 0 && Bdenom > 0)
+                      ? +(femmRes.ironMassB2 / Bdenom).toFixed(3) : undefined;                  // FEA 철손적분 / 앱 첨두근사
+                    setFemmCal({ lam: lamF, ke: femmRes.Ke, kT, cFe, torqueFea: femmRes.avgTorque,
                       Bt: femmRes.Bt, By: femmRes.By, Ld: femmRes.Ld, Lq: femmRes.Lq, source: "FEMM" });
                   }}
                     className="w-full py-2 rounded text-xs font-semibold"
