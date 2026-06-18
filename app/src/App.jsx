@@ -1723,6 +1723,8 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
 
 // ─── Winding 탭 (슬롯 단면 비주얼 + 도선 패킹) ──────────────────
 function packConductors(geo, wind) {
+  // 외전형: 공극면 반경의 내전형 등가 슬롯으로 패킹(치수 동일 → 용량·배치 동일). 위치 반사는 표시단에서.
+  if (geo.rotorType === "outer") return packConductors({ ...geo, statorBore: geo.statorLamDia, rotorType: "inner" }, wind);
   // 슬롯 로컬 좌표(x: 반경방향, y: 접선방향)에서 도선 원 배치
   const Rb = geo.statorBore / 2, Rd = Rb + geo.slotDepth;
   const dlt = Math.PI / geo.slotNumber;
@@ -1800,7 +1802,9 @@ function packConductors(geo, wind) {
 function SlotViewer({ geo, wind, res }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
-  const pack = useMemo(() => packConductors(geo, wind), [geo, wind]);
+  // 외전형: 단면 상세는 공극면 반경의 내전형 등가 슬롯으로 표시(치수·도체패킹 동일, 검증된 경로 재사용)
+  const geoEff = geo.rotorType === "outer" ? { ...geo, statorBore: geo.statorLamDia, rotorType: "inner" } : geo;
+  const pack = useMemo(() => packConductors(geoEff, wind), [geo, wind]);
 
   const draw = useCallback(() => {
     const cv = canvasRef.current, wrap = wrapRef.current;
@@ -1812,7 +1816,7 @@ function SlotViewer({ geo, wind, res }) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#0a1120"; ctx.fillRect(0, 0, W, H);
 
-    const P = geo;
+    const P = geoEff;
     const Rb = P.statorBore / 2, Rd = Rb + P.slotDepth, RoL = P.statorLamDia / 2;
     const dlt = Math.PI / P.slotNumber;
     // 표시 범위: 반경 Rb-3 ~ Rd+4, 접선 ±(피치 0.95)
@@ -3069,9 +3073,17 @@ function WindingLayout({ geo, res }) {
   const wa = res.wa;
   const Ns = geo.slotNumber, poles = geo.poleNumber;
   const Rb = geo.statorBore / 2, RoL = geo.statorLamDia / 2;
-  const Rro = Rb - geo.airgap, Rsh = geo.shaftDia / 2;
+  const outer = geo.rotorType === "outer";
+  const Rsb = outer ? RoL - geo.slotDepth : Rb + geo.slotDepth;                 // 슬롯 바닥
+  const Rro = outer ? RoL + geo.airgap : Rb - geo.airgap;                       // 로터 공극면(자석 표면)
+  const Rcan = outer ? Rro + geo.magnetThickness + (geo.rotorYoke || 0) : Rb - geo.airgap;  // 외전형 캔 외경
+  const Rsh = geo.shaftDia / 2;
+  // 외전형은 마커/엔드턴/단자/번호를 로터(바깥) 피해 보어 안쪽·슬롯 안쪽에 배치
+  const Rlbl = outer ? Rb * 0.86 : RoL * 1.14;
+  const RtS = outer ? Rb * 0.92 : RoL * 1.04, RtE = outer ? Rb * 0.52 : RoL * 1.40;
+  const Rend = outer ? Rsb * 0.97 : RoL * 1.04, Rendc = outer ? Rsb * 0.78 : RoL * 1.22;
   const size = 540, C = size / 2, margin = 14;
-  const worldR = RoL * 1.45;
+  const worldR = (outer ? Rcan : RoL) * 1.45;
   const sc = (C - margin) / worldR;
   const cols = ["#CC2222", "#1B7A2B", "#2244CC"];
   const ang = (k) => (k * 2 * Math.PI) / Ns;          // 슬롯 k 중심각
@@ -3084,7 +3096,7 @@ function WindingLayout({ geo, res }) {
   const magPaths = poles > 0 ? Array.from({ length: poles }, (_, k) => pathD(rotPts(buildMagnetPath(geo), geo.rotorRot * D2R + (k * 2 * Math.PI) / poles))) : [];
 
   // 코일별 마커 + 엔드턴 아크
-  const Rgo = Rb + geo.slotDepth * 0.66, Rret = Rb + geo.slotDepth * 0.34;
+  const Rgo = outer ? RoL - geo.slotDepth * 0.34 : Rb + geo.slotDepth * 0.66, Rret = outer ? RoL - geo.slotDepth * 0.66 : Rb + geo.slotDepth * 0.34;
   const coils = wa.coils.filter((c) => ph < 0 || c.phase === ph);
   const marker = (R, a, into, color, key) => {
     const [x, y] = PR(R, a);
@@ -3100,10 +3112,10 @@ function WindingLayout({ geo, res }) {
     const col = cols[c.phase];
     const ag = ang(c.go), ar = ang(c.ret);
     // 엔드턴: 라미 바깥으로 볼록한 베지어
-    const [gx, gy] = PR(RoL * 1.04, ag), [rx, ry] = PR(RoL * 1.04, ar);
+    const [gx, gy] = PR(Rend, ag), [rx, ry] = PR(Rend, ar);
     let am = (ag + ar) / 2;
     if (Math.abs(ar - ag) > Math.PI) am += Math.PI;   // 0/2π 경계 보정
-    const [cx, cy] = PR(RoL * 1.22, am);
+    const [cx, cy] = PR(Rendc, am);
     arcs.push(<path key={"a" + idx} d={`M${gx.toFixed(1)},${gy.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${rx.toFixed(1)},${ry.toFixed(1)}`}
       fill="none" stroke={col} strokeWidth="1.3" opacity="0.85" />);
     marks.push(marker(Rgo, ag, c.sign > 0, col, "g" + idx));
@@ -3119,7 +3131,7 @@ function WindingLayout({ geo, res }) {
       const lbl = ["U", "V", "W"][p];
       [[pc[0].go, "1", "In"], [pc[pc.length - 1].ret, "2", "Out"]].forEach(([slot, suf, io], j) => {
         const a = ang(slot);
-        const [sx, sy] = PR(RoL * 1.04, a), [ex, ey] = PR(RoL * 1.40, a);
+        const [sx, sy] = PR(RtS, a), [ex, ey] = PR(RtE, a);
         terms.push(<g key={`t${p}_${j}`}>
           <line x1={sx} y1={sy} x2={ex} y2={ey} stroke={col} strokeWidth="2.4" />
           <circle cx={ex} cy={ey} r="4" fill={col} />
@@ -3146,17 +3158,25 @@ function WindingLayout({ geo, res }) {
       </div>
       <div className="flex-1 flex items-center justify-center min-h-0 overflow-auto" style={{ background: "#101a30" }}>
         <svg width={size} height={size}>
-          <circle cx={C} cy={C} r={RoL * sc} fill="#FBE9E9" stroke="#B02020" strokeWidth="1.2" />
-          <circle cx={C} cy={C} r={Rb * sc} fill="#0a1120" stroke="#B02020" strokeWidth="0.8" />
-          {slotPaths.map((d, i) => <path key={"s" + i} d={d} fill="#FAF3C8" stroke="#998800" strokeWidth="0.5" />)}
-          <circle cx={C} cy={C} r={Rro * sc} fill="#CFF3F3" stroke="#0E8C8C" strokeWidth="0.8" />
-          {magPaths.map((d, i) => <path key={"m" + i} d={d} fill="#CDE8CD" stroke="#1E7A1E" strokeWidth="0.4" />)}
-          <circle cx={C} cy={C} r={Rsh * sc} fill="#1a2740" stroke="#0E8C8C" strokeWidth="0.8" />
+          {outer ? (<>
+            <circle cx={C} cy={C} r={Rcan * sc} fill="#CFF3F3" stroke="#0E8C8C" strokeWidth="0.8" />{/* 로터 캔(배경) */}
+            {magPaths.map((d, i) => <path key={"m" + i} d={d} fill="#CDE8CD" stroke="#1E7A1E" strokeWidth="0.4" />)}
+            <circle cx={C} cy={C} r={RoL * sc} fill="#FBE9E9" stroke="#B02020" strokeWidth="1.2" />{/* 스테이터(중심 덮음) */}
+            <circle cx={C} cy={C} r={Rb * sc} fill="#0a1120" stroke="#B02020" strokeWidth="0.8" />
+            {slotPaths.map((d, i) => <path key={"s" + i} d={d} fill="#FAF3C8" stroke="#998800" strokeWidth="0.5" />)}
+          </>) : (<>
+            <circle cx={C} cy={C} r={RoL * sc} fill="#FBE9E9" stroke="#B02020" strokeWidth="1.2" />
+            <circle cx={C} cy={C} r={Rb * sc} fill="#0a1120" stroke="#B02020" strokeWidth="0.8" />
+            {slotPaths.map((d, i) => <path key={"s" + i} d={d} fill="#FAF3C8" stroke="#998800" strokeWidth="0.5" />)}
+            <circle cx={C} cy={C} r={Rro * sc} fill="#CFF3F3" stroke="#0E8C8C" strokeWidth="0.8" />
+            {magPaths.map((d, i) => <path key={"m" + i} d={d} fill="#CDE8CD" stroke="#1E7A1E" strokeWidth="0.4" />)}
+            <circle cx={C} cy={C} r={Rsh * sc} fill="#1a2740" stroke="#0E8C8C" strokeWidth="0.8" />
+          </>)}
           {arcs}
           {marks}
           {terms}
           {Array.from({ length: Ns }, (_, k) => {
-            const [lx, ly] = PR(RoL * 1.14, ang(k));
+            const [lx, ly] = PR(Rlbl, ang(k));
             return <text key={"n" + k} x={lx} y={ly + 3} fontSize="10" fill="#7e8eac" textAnchor="middle">{k + 1}</text>;
           })}
         </svg>

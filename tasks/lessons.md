@@ -140,3 +140,11 @@
   Rro−ε로 에어갭 전체를 group0에. magnetReduction은 외전형서 미추출→0(기본1.3 면취가 메시 슬리버 유발).
 - 결과: 외전형 OuterType 30S32P FEA **토크 1.294Nm·λ 2.63mVs·Bg 1.035T 정상**. 내전형 무회귀
   (400W FEMM λ14.22·토크1.254 불변). 교훈: 토폴로지 반전은 반경 부호(abs)·미라벨 영역·그룹경계가 함정.
+
+## 2026-06-19 — 외전형 지원 ④ 보조 시각화 (WindingLayout·SlotViewer)
+
+- WindingLayout(권선배치도): 외전형은 자석/캔을 외경 바깥에 그림(캔 배경→자석→스테이터→보어→슬롯 순).
+  마커·엔드턴·단자·슬롯번호는 로터(바깥) 피해 보어 안쪽·슬롯 안쪽 반경에. worldR에 캔 포함. 슬롯/자석 형상 자동.
+- SlotViewer·packConductors: 외전형은 **공극면 반경의 내전형 등가 슬롯**으로 처리(statorBore=statorLamDia·
+  rotorType=inner). 치수·도체패킹 동일 → 검증된 경로 재사용, 단일슬롯 상세는 반사 전 형상으로 충분.
+- **외전형 지원 완료**: 임포트·형상·compute·GeometryTab렌더·FEMM·권선뷰·슬롯뷰 전부. 내전형 전 구간 무회귀.
