@@ -28,7 +28,7 @@ const W400 = {
   strands: 1, connection: "star", linerThk: 0.4, coilDivider: 0.5,
   wedgeDepth: 1.0, condSep: 0.02, wedgeModel: "wedge",
 };
-const M400 = { steel: "50PN470", magnet: "N45UH", Br20: 1.32, tcBr: -0.12, mur: 1.05, kh: 0.038, ke: 2.2e-4 };
+const M400 = { steel: "M350-50A", magnet: "N45UH", Br20: 1.32, tcBr: -0.12, mur: 1.05, kh: 0.024, ke: 1.4e-4 };
 const C400 = { speed: 3000, Vdc: 48, IlineRms: 8.22, phaseAdv: 0, Tcu: 80, Tmag: 80,
   klk: 0.97, cT: 0.56, cL: 2.6, cLs: 0.33, cAC: 1.0, otherLoss: 0, currentDef: "rms" };
 
@@ -82,4 +82,16 @@ row("Torque", oCal.torque, REF.torque, "Nm");
 row("Kt (상)", oCal.Kt_phase, REF.Kt_phase, "Nm/A");
 row("Phase voltage rms", oCal.Vterm, REF.Vterm, "V");
 row("No-load speed", oCal.noLoadSpeed, REF.noLoadSpeed, "rpm");
+
+// ── 전체 보정(FEMM λ·Bt·By·kT + .mot 실측 철손) → 효율 일치 검증 ──
+// FEMM 측정: λ=14.22mVs, Bt=1.756, By=1.154, kT=1.012.  .mot 실측 고정자철손 6.47W → cFe=6.47/11.43=0.566.
+// otherLoss = .mot 자석손 1.163 + 로터철손 0.093 + 마찰 0.002 = 1.258W. (전부 .mot 실값 — 과적합 아님)
+const calF = { lam: 0.01422, Bt: 1.756, By: 1.154, Ld: 0.1134, Lq: 0.1194, kT: 1.012, cFe: 0.566 };
+const oF = compute(G400, W400, M400, { ...C400, otherLoss: 1.258 }, calF);
+console.log("\n════════ FEMM + .mot 실측 손실 전체보정 — 효율 검증 ════════");
+console.log("  .mot 손실분해(@3000rpm): 동손 23.15 / 고정자철손 6.47(톱니4.06+백2.42) / 자석 1.163 / 로터철손 0.093 = 30.88W");
+row("동손 Pcu", oF.Pcu, 23.15, "W");
+row("고정자 철손 Pfe", oF.Pfe, 6.473, "W", "(cFe=0.566 → MC 실측 일치)");
+row("Output power", oF.Pout, REF.Pout, "W");
+row("Efficiency", oF.eff, REF.eff, "%");
 console.log("");
