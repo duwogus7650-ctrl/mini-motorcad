@@ -4,7 +4,7 @@ import numpy as np
 Ns, poles = 18, 16; pp = poles // 2
 Bore, g, lm, mur = 79.66, 0.5, 3.6, 1.05
 LamDia, arcED, Br = 114.0, 145.0, 1.225
-Lstk, Lmag = 30.0, 27.9
+Lmag = 27.9
 so, tw, sd = 0.56, 4.6, 14.2
 Nc, throw = 12, 1
 speed, Iph_pk = 3200, 20.25

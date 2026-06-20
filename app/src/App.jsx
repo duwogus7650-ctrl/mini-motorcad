@@ -729,7 +729,10 @@ function compute(G, W, M, C, cal) {
   const Iph = W.connection === "delta" ? C.IlineRms / Math.sqrt(3) : C.IlineRms;
   out.IphRms = Iph; out.IlineRms = C.IlineRms;
   const IphPk = Iph * Math.SQRT2;
-  const Iq = IphPk * Math.cos(C.phaseAdv * D2R);
+  // dq 전류(피크) — 단일 소스(P2): 토크·부하각·전압이 같은 idPk/iqPk를 공유(규약 드리프트 방지).
+  const adv = C.phaseAdv * D2R;
+  const idPk = -IphPk * Math.sin(adv), iqPk = IphPk * Math.cos(adv);
+  const Iq = iqPk;   // 정렬(자석) 토크용 q축 전류
   // kT: FEMM 직접토크/λ공식토크 비율 = 부하 포화 보정. 보정 미적용이면 1.
   const kT = (cal && Number.isFinite(cal.kT)) ? cal.kT : 1;
   out.kTsat = kT;
@@ -856,6 +859,20 @@ function compute(G, W, M, C, cal) {
   const LdAnalytic = (Lm + Lslot) * 1e3, LqAnalytic = LdAnalytic * 1.09; // SPM: Lq 약간 큼(슬롯/포화)
   out.Ld = (cal && Number.isFinite(cal.Ld) && cal.Ld > 0) ? cal.Ld : LdAnalytic;  // FEMM 보정 시 FEA 인덕턴스
   out.Lq = (cal && Number.isFinite(cal.Lq) && cal.Lq > 0) ? cal.Lq : LqAnalytic;
+  // 릴럭턴스 토크 보정(P1): adv≠0서 (Ld−Lq)·id·iq 항 — T-N곡선·효율맵과 동일식으로 운전점 토크 일치.
+  // adv=0 → idPk=0 → Trel=0 → 무변경(검증된 400W/1250W·해석식 경로 byte-identical 보존).
+  const Trel = 1.5 * pp * (out.Ld - out.Lq) * 1e-3 * idPk * iqPk * kT;
+  if (Trel !== 0) {
+    out.torque += Trel;
+    out.Kt_phase = Iph > 0 ? out.torque / Iph : 0;
+    out.KtLine = C.IlineRms > 0 ? out.torque / (C.IlineRms * Math.SQRT2) : 0;
+    out.Pem = out.torque * wm;
+    out.Pin = out.Pem + out.PcuAC;
+    out.Pout = out.Pem - out.Pfe - C.otherLoss;
+    out.Tshaft = wm > 0 ? out.Pout / wm : 0;
+    out.eff = (out.Pin > 0 && out.Pout > 0) ? Math.min((out.Pout / out.Pin) * 100, 100) : 0;
+    out.TRV = out.torque / (Math.PI * RoM ** 2 * Lstk * 1e-9) / 1000;
+  }
 
   // ── ini_pos: 부하 시 역기전력(전기자반작용 포함) zero-cross 상승점이 0°가 되는 회전자 위치 ──
   // 무부하 기준: U상 자기축 ψ0=arg(Σ turns_U·e^{j·pp·φ}); 상승영점 ppδ=ψ0+90°.
@@ -869,9 +886,7 @@ function compute(G, W, M, C, cal) {
       imS += wa.table[i][0] * Math.sin(pp * phi);
     }
     const psi0 = Math.atan2(imS, reS);
-    const advR = C.phaseAdv * D2R;
-    const idL = -IphPk * Math.sin(advR), iqL = IphPk * Math.cos(advR);
-    const lamD = lam + out.Ld * 1e-3 * idL, lamQ = out.Lq * 1e-3 * iqL;
+    const lamD = lam + out.Ld * 1e-3 * idPk, lamQ = out.Lq * 1e-3 * iqPk;   // 단일소스 idPk/iqPk 사용(P2)
     const dL = Math.atan2(lamQ, lamD);                        // 부하각(전기) [rad]
     out.loadAngle = dL / D2R;                                 // 부하각 [elec deg]
     out.lamD_load = lamD; out.lamQ_load = lamQ;               // 부하 dq 쇄교자속 [Wb] (Motor-CAD Flux Linkage D/Q on load)
@@ -896,10 +911,7 @@ function compute(G, W, M, C, cal) {
   const we = 2 * Math.PI * fe;
   // 단자전압·역률 — 진각(phaseAdv)을 반영한 정식 dq 정상상태식.
   // lam=피크 쇄교자속, IphPk=피크 상전류. 진각>0 → id<0(약계자). adv=0이면 기존식과 동일.
-  const adv = C.phaseAdv * D2R;
-  const idPk = -IphPk * Math.sin(adv);                 // d축 전류(피크)
-  const iqPk = IphPk * Math.cos(adv);                  // q축 전류(피크) = Iq
-  const LdH = out.Ld * 1e-3, LqH = out.Lq * 1e-3;
+  const LdH = out.Ld * 1e-3, LqH = out.Lq * 1e-3;   // adv·idPk·iqPk는 위에서 단일소스로 정의(P2)
   const VdPk = out.Rphase * idPk - we * LqH * iqPk;
   const VqPk = out.Rphase * iqPk + we * (LdH * idPk + lam);
   out.Vterm = Math.hypot(VdPk, VqPk) / Math.SQRT2;     // rms 상단자전압
@@ -1038,7 +1050,7 @@ function femmLua(geo, wind, calc, res) {
   label((Rro + Rb) / 2, 0, "Air", 0, 0);                         // 에어갭
   // 슬롯 코일: 슬롯별 정전류밀도 J [MA/m²]
   for (let i = 0; i < Ns; i++) {
-    const netAT = tbl[i][0] * ia + tbl[i][1] * ib + tbl[i][2] * ic;
+    const netAT = (tbl[i][0] * ia + tbl[i][1] * ib + tbl[i][2] * ic) / (wind.parallelPaths || 1);   // P4: 병렬회로수로 도체당 전류 환산(femm_server와 일치, P=1이면 무변경)
     const J = netAT / slotA / 1e6;
     L.push(`mi_addmaterial('Coil${i}',1,1,0,${J.toFixed(5)},0,0,0,1,0,0,0,0,0)`);
     const a = geo.statorRot * D2R + i * 2 * Math.PI / Ns, rr = Rb + 0.45 * geo.slotDepth;

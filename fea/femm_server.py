@@ -39,7 +39,8 @@ def _finite(v):
 
 app = Flask(__name__)
 CORS(app)
-_solve_lock = threading.Lock()   # FEMM 전역(단일 인스턴스) 보호: 해석을 직렬화
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024   # 요청 본문 최대 2 MiB
+_solve_lock = threading.Lock()   # FEMM 전역(단일 인스턴스) 보호: 해석을 직렬화; 반드시 이 잠금 안에서만 FEMM 접근
 
 D2R = math.pi / 180.0
 MU0 = 4e-7 * math.pi
@@ -99,7 +100,7 @@ def build(d):
     Ns, poles = d['Ns'], d['poles']
     Rlam, Rb, Rro, Rmi, Rsh = d['Rlam'], d['Rb'], d['Rro'], d['Rmi'], d['Rsh']
     sp, mp = d['slotPoly'], d['magnetPoly']
-    sROT, rROT = d['statorRot'] * D2R, d['rotorRot'] * D2R
+    sROT, rROT = d.get('statorRot', 0.0) * D2R, d.get('rotorRot', 0.0) * D2R
     slotDepth = d['slotDepth']
     Rd = Rb + slotDepth
     # 토폴로지: 외전형은 공극면=스테이터 OD(Rlam), 자석·로터캔이 바깥.
@@ -145,7 +146,7 @@ def build(d):
         femm.mi_smartmesh(0)
         print('[build] smartmesh OFF 적용 (블록 메시 크기 유효)', flush=True)
     except Exception as e:
-        print('[build] smartmesh 호출 불가(%s) — pyfemm/FEMM 버전 확인 필요' % e, flush=True)
+        raise RuntimeError('FEMM smartmesh를 끌 수 없음 — 메시 폭주 방지 위해 중단') from e
     femm.mi_probdef(0, 'millimeters', 'planar', PRECISION, d['depth'], 30)
     femm.mi_getmaterial('Air')
     femm.mi_getmaterial('M-19 Steel')
@@ -316,10 +317,17 @@ def solve():
         if not isinstance(d, dict):
             return jsonify(ok=False, error='잘못된 JSON 본문 (객체 필요)'), 200
         req = ['Ns', 'poles', 'Rlam', 'Rb', 'Rro', 'Rmi', 'slotDepth', 'Ipk', 'depth',
-               'slotPoly', 'magnetPoly', 'slotTurns']
+               'slotPoly', 'magnetPoly', 'slotTurns', 'Br', 'slotArea', 'Rsh']
         miss = [k for k in req if k not in d]
         if miss:
             return jsonify(ok=False, error='필수 입력 누락: ' + ', '.join(miss)), 200
+        try:
+            d['Ns'] = int(d['Ns'])
+            d['poles'] = int(d['poles'])
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error='Ns/poles 정수·양수·짝수 필요'), 200
+        if d['Ns'] <= 0 or d['poles'] <= 0 or d['poles'] % 2 != 0:
+            return jsonify(ok=False, error='Ns/poles 정수·양수·짝수 필요'), 200
         # 토폴로지 샘플 반경 (외전형 대응) — flux_linkage/airgap_bn/sample_iron/iron_loss 공용
         _o = d.get('rotorType') == 'outer'
         _Rl, _Rb, _Rr, _sd = d['Rlam'], d['Rb'], d['Rro'], d['slotDepth']
@@ -332,8 +340,15 @@ def solve():
         d['_Ryokemid'] = (_Rsb + _Rb) / 2 if _o else (_Rsb + _Rl) / 2
         d['_Rt0'], d['_Rt1'] = min(_Rag, _Rsb), max(_Rag, _Rsb)
         d['_Ry0'], d['_Ry1'] = (min(_Rsb, _Rb), max(_Rsb, _Rb)) if _o else (min(_Rsb, _Rl), max(_Rsb, _Rl))
+        # 수치 선택 파라미터 — 형식 오류를 잠금 진입 전에 잡는다
+        try:
+            d['_phaseAdv'] = float(d.get('phaseAdv', 0.0))
+            d['_parallelPaths'] = max(1, int(d.get('parallelPaths', 1)))
+            d['_speed'] = float(d.get('speed', 0.0))
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error='수치 파라미터 형식 오류'), 200
     except Exception as e:
-        return jsonify(ok=False, error='요청 파싱 실패: ' + str(e), trace=traceback.format_exc()), 200
+        return jsonify(ok=False, error='요청 파싱 실패: ' + str(e)), 200
     print('\n[solve] 요청 수신 — Ns=%s poles=%s  topology=%s  FEMM 구동 시도...' % (d.get('Ns'), d.get('poles'), 'outer' if _o else 'inner'), flush=True)
     with _solve_lock:                       # 동시 요청 직렬화 (FEMM 단일 인스턴스)
         pythoncom.CoInitialize()            # 이 워커 스레드에서 COM 사용 준비 (FEMM ActiveX)
@@ -342,14 +357,14 @@ def solve():
             Ns, poles = d['Ns'], d['poles']
             pp = poles / 2
             Ipk = d['Ipk']
-            sROT = d['statorRot'] * D2R
-            rROT = d['rotorRot'] * D2R
-            adv = float(d.get('phaseAdv', 0.0))             # 위상진각[elec deg]
-            P = max(1, int(d.get('parallelPaths', 1)))
-            speed = float(d.get('speed', 0.0))              # rpm (역기전력 환산용)
+            sROT = d.get('statorRot', 0.0) * D2R
+            rROT = d.get('rotorRot', 0.0) * D2R
+            adv = d['_phaseAdv']                             # 위상진각[elec deg]
+            P = d['_parallelPaths']
+            speed = d['_speed']                             # rpm (역기전력 환산용)
             depth_m = d['depth'] * 1e-3
-            nLoad = int(d.get('nLoad', 12))                 # 부하/리플 스윕 스텝
-            nCog = int(d.get('nCog', 10))                   # 코깅 스윕 스텝
+            nLoad = max(1, int(d.get('nLoad', 12)))          # 부하/리플 스윕 스텝
+            nCog = max(1, int(d.get('nCog', 10)))           # 코깅 스윕 스텝
 
             build(d)
             opened = True
@@ -434,7 +449,10 @@ def solve():
                 BtFea = max(BtFea, bt); ByFea = max(ByFea, by_)
                 print('[solve] 부하 %d/%d  T=%.3f Nm' % (s + 1, nLoad, T), flush=True)
             avgT = sum(loadT) / len(loadT)
-            ripT = (max(loadT) - min(loadT)) / abs(avgT) * 100 if abs(avgT) > 1e-6 else 0.0
+            if not math.isfinite(avgT) or abs(avgT) <= 1e-3:
+                ripT = None
+            else:
+                ripT = (max(loadT) - min(loadT)) / abs(avgT) * 100
 
             # 2b) 고정자 철손 B²·질량 적분 — 전기 1주기(=360/pp 기계도) 시간스텝 + 치/요크 공간격자 샘플.
             # 각 점의 Bpk(주기 최대)로 Σ Bpk²·mass[kg·T²]. 앱이 (kh·f+ke·f²)·이값 = FEA 철손.
@@ -451,8 +469,8 @@ def solve():
                 nr_y, na_y = 4, 6 * Ns                           # 요크 ring (전둘레)
                 for ir in range(nr_y):
                     r = Ry0 + (Ry1 - Ry0) * (ir + 0.5) / nr_y
-                    for ia in range(na_y):
-                        a = sROT + 2 * math.pi * (ia + 0.5) / na_y
+                    for iang in range(na_y):
+                        a = sROT + 2 * math.pi * (iang + 0.5) / na_y
                         dA = (Ry1 - Ry0) / nr_y * (2 * math.pi * r / na_y)
                         samples.append((r * math.cos(a), r * math.sin(a), dA))
                 nr_t = 5                                         # 치 (각 치 중심각, 폭 Wt)
@@ -498,8 +516,8 @@ def solve():
             femm.mo_close()
             femm.mi_close()
 
-            print('[solve] 완료 — 평균토크 %.3f Nm, 리플 %.1f%%, 코깅 %.1f mNm, Bg %.3f T, Ke %.4f, Bt %.2f By %.2f'
-                  % (avgT, ripT, cogPP, Bg, Ke, BtFea, ByFea), flush=True)
+            print('[solve] 완료 — 평균토크 %.3f Nm, 리플 %s%%, 코깅 %.1f mNm, Bg %.3f T, Ke %.4f, Bt %.2f By %.2f'
+                  % (avgT, ('%.1f' % ripT if ripT is not None else 'N/A'), cogPP, Bg, Ke, BtFea, ByFea), flush=True)
             payload = dict(ok=True, avgTorque=avgT, torqueRipple=ripT, torqueValid=abs(avgT) > 1e-3,
                            coggingPP=cogPP, Bg=Bg, Ke=Ke, BEMFpk=BEMFpk,
                            Bt=BtFea, By=ByFea, Ld=Ld, Lq=Lq,
@@ -521,8 +539,13 @@ def solve():
                 femm.mi_close()
             except Exception:
                 pass
-            return jsonify(ok=False, error=str(e), trace=traceback.format_exc())
+            return jsonify(ok=False, error=str(e)), 200
         finally:
+            if opened:
+                try:
+                    femm.closefemm()
+                except Exception:
+                    pass
             pythoncom.CoUninitialize()
 
 
@@ -533,4 +556,4 @@ def ping():
 
 if __name__ == '__main__':
     print('Mini Motor-CAD ↔ FEMM 브릿지: http://localhost:8765  (Ctrl+C 종료)')
-    app.run(host='127.0.0.1', port=8765)
+    app.run(host='127.0.0.1', port=8765, threaded=True)
