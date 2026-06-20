@@ -67,12 +67,12 @@ class ErrorBoundary extends Component {
                 className="text-xs px-3 py-1.5 rounded font-semibold" style={{ background: `linear-gradient(180deg,${UI.blue},#2456c8)`, color: "#fff" }}>
                 ⟲ 기준형상(1250W)으로 되돌리기
               </button>
-              <button onClick={() => location.reload()}
+              <button onClick={() => window.location.reload()}
                 className="text-xs px-3 py-1.5 rounded" style={{ border: `1px solid ${UI.border}`, color: UI.text, background: UI.inset }}>
                 페이지 새로고침
               </button>
             </div>
-            <div className="text-xs mt-3" style={{ color: UI.faint, fontFamily: UI.mono }}>{String(this.state.err && this.state.err.message || this.state.err).slice(0, 200)}</div>
+            <div className="text-xs mt-3" style={{ color: UI.faint, fontFamily: UI.mono }}>{String(this.state.err?.message ?? this.state.err).slice(0, 200)}</div>
           </div>
         </div>
       );
@@ -80,6 +80,9 @@ class ErrorBoundary extends Component {
     return this.props.children;
   }
 }
+
+// 비유한(NaN/Infinity) → "—" 표시. 편집 중 퇴화 입력이 숫자칸에 NaN으로 새는 것 방지.
+const fmt = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "—");
 
 // ─── DXF 파서 ────────────────────────────────────────────────────
 function parseDxf(text) {
@@ -113,7 +116,8 @@ function parseDxf(text) {
         else if (c === 40) r = num(v); else if (c === 50) a1 = num(v); else if (c === 51) a2 = num(v);
         i++;
       }
-      shapes.push(isArc ? { type: "arc", cx, cy, r, a1: a1 * D2R, a2: a2 * D2R } : { type: "circle", cx, cy, r });
+      if ([cx, cy, r].every(Number.isFinite) && r > 0)   // 코드40(r) 누락 등 → NaN cx가 중심중앙값 오염 방지
+        shapes.push(isArc ? { type: "arc", cx, cy, r, a1: a1 * D2R, a2: a2 * D2R } : { type: "circle", cx, cy, r });
     } else if (val === "LWPOLYLINE") {
       let closed = false; const verts = []; i++;
       while (i < pairs.length && pairs[i][0] !== 0) {
@@ -692,7 +696,7 @@ function compute(G, W, M, C, cal) {
   const taus = Math.PI * 2 * Rag / Ns;   // 공극면 슬롯피치 (외전형은 외경 기준)
   const gC = g > 1e-6 ? g : 1e-6;        // 공극 0 방어(g≈0서 Carter 발산 방지)
   const gam = (G.slotOpening / gC) ** 2 / (5 + G.slotOpening / gC);
-  const kc = taus / Math.max(taus - gam * gC, 1e-6);  // 광폭 개구서 분모≤0 → NaN/음수 방어
+  const kc = Math.min(Math.max(taus / Math.max(taus - gam * gC, 1e-6), 1), 3);  // Carter는 물리상 ≥1: 광폭개구서 분모≤0→kc폭발(Bg→0) 방지 위해 [1,3]로 클램프
   const Bgpk = Br * lm / (lm + mag.mur * kc * gC);
   out.Br_used = Br; out.kc = kc; out.Bgpk = Bgpk;
 
@@ -791,7 +795,7 @@ function compute(G, W, M, C, cal) {
   const BtAnalytic = C.cT * Bgpk * taus / G.toothWidth;
   const byDepth = Ry1 - Ry0;   // 요크 반경깊이(토폴로지 무관: 슬롯반대편)
   out.byDepth = byDepth;
-  const ByAnalytic = BtAnalytic * G.toothWidth / (2 * Math.max(byDepth, 0.1));   // 백아이언 깊이≤0 가드
+  const ByAnalytic = Math.min(BtAnalytic * G.toothWidth / (2 * Math.max(byDepth, 0.1)), 2.5);   // 백아이언 깊이≤0 가드 + 포화 상한 2.5T(퇴화 요크서 By 폭발→Pfe∝By² 과대 방지)
   out.Bt = (cal && Number.isFinite(cal.Bt)) ? cal.Bt : BtAnalytic;
   out.By = (cal && Number.isFinite(cal.By)) ? cal.By : ByAnalytic;
 
@@ -818,7 +822,7 @@ function compute(G, W, M, C, cal) {
   out.mActive = out.mStator + out.mRotor + out.mMagnet + out.mCopper;
 
   // AC 동손 (근접효과 근사, fe² 스케일) — cAC로 kro80 FEA 캘리브레이션. 슬롯 깊이방향 층수 기반.
-  const deltaSkin = Math.sqrt(rho / (Math.PI * fe * MU0));            // 표피깊이 [m]
+  const deltaSkin = Math.sqrt(rho / (Math.PI * Math.max(fe, 1e-6) * MU0));            // 표피깊이 [m] (fe=0→Infinity 방어)
   const xiAC = (W.copperDia * 1e-3) / deltaSkin;                     // 환산높이 ξ = d/δ
   const mLayer = Math.max(1, Math.round(out.windingDepth / W.wireDia)); // 슬롯깊이 방향 도체 층수
   const cAC = Number.isFinite(C.cAC) ? C.cAC : 1;                    // 빈칸/미정의 방어
@@ -880,11 +884,11 @@ function compute(G, W, M, C, cal) {
   }
 
   // 파생량 (Motor-CAD Output Data 항목)
-  out.Km = out.Pcu > 0 ? out.torque / Math.sqrt(out.Pcu) : 0;
+  out.Km = (out.Pcu > 0 && out.torque > 0) ? out.torque / Math.sqrt(out.Pcu) : 0;
   out.Te = out.Rphase > 0 ? (out.Lq * 1e-3 / out.Rphase) * 1e3 : 0; // Rphase=0(턴/도선 0) Infinity 방어
   const gcd = (a, b) => (b ? gcd(b, a % b) : a);
-  const lcmSP = (Ns * poles) / gcd(Ns, poles);
-  out.coggingPeriod = 360 / lcmSP;
+  const lcmSP = (Ns > 0 && poles > 0) ? (Ns * poles) / gcd(Ns, poles) : 0;
+  out.coggingPeriod = lcmSP > 0 ? 360 / lcmSP : 0;   // poles/Ns=0(편집 중) → Infinity 누출 방어
   out.coggingFreq = (lcmSP * C.speed) / 60;
   out.optSkew = out.coggingPeriod;                            // 최적 스큐각[기계도] ≈ 코깅 1주기(슬롯고조파 상쇄)
   const RoMm = RoM * 1e-3, RiMm = RiM * 1e-3, Rshm = (G.shaftDia / 2) * 1e-3;
@@ -903,7 +907,7 @@ function compute(G, W, M, C, cal) {
   out.VsupplyRms = C.Vdc / Math.SQRT2;
   out.Istall = C.Vdc / out.RlineLine;
   out.Tstall = out.KtLine * out.Istall;
-  out.numLam = G.magneticLength / stl.thk;
+  out.numLam = G.magneticLength / (stl.thk || 0.5);
   const S_fe = out.mTooth * out.Bt ** 2 + out.mBy * out.By ** 2;
   out.PfeHyst = cFe * stl.kh * fe * S_fe;
   out.PfeEddy = cFe * stl.ke * fe ** 2 * S_fe;
@@ -1058,8 +1062,8 @@ function femmLua(geo, wind, calc, res) {
 }
 
 // ─── Self-Check 탭 (자동 검증: 참조 대조·물리 타당성·FEA 교차검증) ─────
-function SelfCheckTab({ res, calc, wind, femmCal, solved }) {
-  if (!res) return <div className="p-6 text-sm" style={{ color: UI.label }}>해석 결과 없음 — Calculation 탭에서 Solve 하세요.</div>;
+function SelfCheckTab({ res, calc, femmCal, solved }) {
+  if (!res || !solved) return <div className="p-6 text-sm" style={{ color: UI.label }}>해석 결과 없음 — Calculation 탭에서 Solve 하세요.</div>;
   const dev = (c, r) => (r ? ((c - r) / r) * 100 : 0);
   const devColor = (d) => (Math.abs(d) < 2 ? UI.green : Math.abs(d) < 8 ? UI.amber : UI.red);
   const refRows = [
@@ -1176,7 +1180,7 @@ export default function MiniMotorCad() {
   const rawRes = useMemo(() => {
     try {
       const r = compute(geo, wind, mat, calc, femmCal);
-      return ["torque", "Rphase", "slotArea", "eff", "kw1"].every((k) => isFinite(r[k])) ? r : null;
+      return ["torque", "Rphase", "slotArea", "eff", "kw1", "Jrotor", "PF"].every((k) => isFinite(r[k])) ? r : null;
     } catch (e) { return null; }
   }, [geo, wind, mat, calc, femmCal]);
   const lastResRef = useRef(null);
@@ -1337,7 +1341,7 @@ export default function MiniMotorCad() {
           {tab === "output" && <OutputTab res={res} calc={calc} showRef={showRef} solved={solved} />}
           {tab === "graphs" && <GraphsTab res={res} calc={calc} solved={solved} />}
           {tab === "thermal" && <ThermalTab geo={geo} wind={wind} calc={calc} res={res} therm={therm} sT={sT} solved={solved} />}
-          {tab === "selfcheck" && <SelfCheckTab res={res} calc={calc} wind={wind} femmCal={femmCal} solved={solved} />}
+          {tab === "selfcheck" && <SelfCheckTab res={res} calc={calc} femmCal={femmCal} solved={solved} />}
         </ErrorBoundary>
       </div>
     </div>
@@ -1641,7 +1645,7 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
               측정 {measure ? "ON" : "OFF"}
             </button>
           </div>
-          <button onClick={() => { if (confirm("형상을 1250W-jk 기준값으로 되돌립니다. 진행할까요?")) resetGeo(); }}
+          <button onClick={() => { if (window.confirm("형상을 1250W-jk 기준값으로 되돌립니다. 진행할까요?")) resetGeo(); }}
             className="text-xs px-2 py-1 rounded" style={{ border: "1px solid #22304d", background: "#101a30", color: "#7e8eac" }}>
             ⟲ 기준형상 리셋 (1250W)
           </button>
@@ -1929,7 +1933,7 @@ function SlotViewer({ geo, wind, res }) {
 function WindingTab({ geo, wind, sW, res, showRef }) {
   const [wireType, setWireType] = useState("direct");
   const [windView, setWindView] = useState("section");
-  if (!res) return null;
+  if (!res) return <div className="p-4 text-sm" style={{ color: UI.label }}>계산 불가 — 입력값 확인</div>;
   const wa = res.wa;
   const harmonics = [1, 3, 5, 7, 9, 11, 13];
   return (
@@ -2087,7 +2091,7 @@ function MaterialsTab({ mat, sM, res, showRef }) {
   const TR = ({ children, total }) => (
     <tr style={{ borderTop: "1px solid #22304d", background: total ? "#0c1424" : undefined }}>{children}</tr>
   );
-  if (!res) return null;
+  if (!res) return <div className="p-4 text-sm" style={{ color: UI.label }}>계산 불가 — 입력값 확인</div>;
   return (
     <div className="h-full overflow-auto p-3">
       <table className="text-xs" style={{ background: "#101a30", border: "1px solid #22304d" }}>
@@ -2543,7 +2547,7 @@ function Plot({ title, sub, series, h = 190, step = false }) {
           const xv = x0 + ((x1 - x0) * i) / 6;
           return (
             <g key={"x" + i}>
-              <line y1={P.t} y2={h - P.b} x1={sx(xv)} x2={sx(xv)} stroke="#F4F6F8" />
+              <line y1={P.t} y2={h - P.b} x1={sx(xv)} x2={sx(xv)} stroke="#1a2740" />
               <text y={h - P.b + 12} x={sx(xv)} fontSize="9" fill="#7e8eac" textAnchor="middle">{Math.round(xv)}</text>
             </g>
           );
@@ -2725,7 +2729,7 @@ function GraphsTab({ res, calc, solved }) {
     if (!res) return null;
     const N = 241;
     const harm = [1, 3, 5, 7, 9, 11, 13];
-    const a = res.magnetAlpha, s1 = Math.sin((Math.PI * a) / 2);
+    const a = res.magnetAlpha, s1 = Math.sin((Math.PI * a) / 2) || 1e-9;   // magnetArcED=0서 0/0 NaN 방어
     // 공극자속 사다리꼴 분해 → BEMF 고조파: (kw_n/kw_1)·sin(nπα/2)/(n·sin(πα/2))
     const eRel = harm.map((n) => (res.wa.kw(n) / res.kw1) * (Math.sin((n * Math.PI * a) / 2) / (n * s1)));
     const IphPk = res.IphRms * Math.SQRT2;
@@ -2902,7 +2906,7 @@ function solveLin(A, b) {
     const piv = M[c][c] || 1e-12;
     for (let r = 0; r < n; r++) { if (r === c) continue; const f = M[r][c] / piv; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
   }
-  return M.map((r, i) => r[n] / (r[i] || 1e-12));
+  return M.map((r, i) => { const d = r[i]; return Math.abs(d) < 1e-12 ? NaN : r[n] / d; });   // 특이행렬→유한 garbage 대신 NaN(fmt가 "—" 표시)
 }
 
 // ─── Thermal 탭 (집중정수 열등가회로 6노드 — 부품별 온도, Motor-CAD식) ───────
@@ -3021,9 +3025,9 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
           <div className="px-2 py-1 text-xs font-bold" style={{ borderBottom: "1px solid #22304d" }}>부품별 온도 (정상상태)</div>
           <div className="px-3 py-3 text-center" style={{ background: "#0a1120" }}>
             <div className="text-xs" style={{ color: "#7e8eac" }}>권선 핫스팟 포화온도 (예측)</div>
-            <div style={{ fontSize: 30, fontWeight: 700, color: data.hot > 130 ? "#ff5d6c" : "#2bd47a", fontFamily: "JetBrains Mono,Consolas,monospace" }}>{data.hot.toFixed(1)} °C</div>
+            <div style={{ fontSize: 30, fontWeight: 700, color: data.hot > 130 ? "#ff5d6c" : "#2bd47a", fontFamily: "JetBrains Mono,Consolas,monospace" }}>{fmt(data.hot, 1)} °C</div>
           </div>
-          <Row k="권선 핫스팟" v={data.hot.toFixed(1)} u="°C" c="#B02020" />
+          <Row k="권선 핫스팟" v={fmt(data.hot, 1)} u="°C" c="#B02020" />
           <Row k="엔드와인딩" v={data.T[1].toFixed(1)} u="°C" c={data.T[1] >= data.T[0] ? "#B02020" : undefined} />
           <Row k="활성권선(슬롯)" v={data.T[0].toFixed(1)} u="°C" />
           <Row k="스테이터 철심" v={data.T[2].toFixed(1)} u="°C" />
@@ -3039,7 +3043,7 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
           <Row k="하우징→공기 R" v={data.Rconv.toFixed(3)} u="K/W" />
           <Row k="에어갭 R" v={data.Rgap.toFixed(3)} u="K/W" />
           <Row k="하우징(사용)" v={data.Dh.toFixed(0) + "×" + data.Lh.toFixed(0)} u="mm" />
-          <Row k="열 시정수 τ" v={(data.tau / 60).toFixed(1)} u="분" />
+          <Row k="열 시정수 τ" v={fmt(data.tau / 60, 1)} u="분" />
         </div>
         {data.hot > 130 && <div className="text-xs mt-1 px-1" style={{ color: "#B02020" }}>⚠ 권선 핫스팟 과다 — 이 냉각방식으론 연속정격 불가. 강제공냉/전도방열 또는 하우징 확대 필요.</div>}
         {data.T[4] > 120 && <div className="text-xs mt-1 px-1" style={{ color: "#B02020" }}>⚠ 자석온도 {data.T[4].toFixed(0)}°C — 감자 위험. 자석 등급(내열) 확인.</div>}
@@ -3063,7 +3067,7 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
           </svg>
           <div className="px-2 pb-1 text-xs" style={{ color: "#7e8eac" }}>파랑 {Tmn.toFixed(0)}° → 적색 {Tmx.toFixed(0)}° · 하우징 외경/길이를 바꾸면 단면이 변합니다.</div>
         </div>
-        <Plot title="포화온도 예측 (온도–시간)" sub={"정상상태 " + data.Tss.toFixed(1) + "°C · 시정수 τ " + (data.tau / 60).toFixed(1) + "분 · ≈" + (5 * data.tau / 60).toFixed(0) + "분 후 포화"}
+        <Plot title="포화온도 예측 (온도–시간)" sub={"정상상태 " + fmt(data.Tss, 1) + "°C · 시정수 τ " + fmt(data.tau / 60, 1) + "분 · ≈" + fmt(5 * data.tau / 60, 0) + "분 후 포화"}
           h={300} series={[
             { x: data.tmin, y: data.temp, color: "#B02020", label: "Coil Temp [°C] vs 분" },
             { x: [0, data.tmin[data.tmin.length - 1]], y: [data.Tss, data.Tss], color: "#7e8eac", label: "포화온도" },
