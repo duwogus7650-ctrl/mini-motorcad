@@ -755,31 +755,35 @@ function compute(G, W, M, C, cal) {
   out.Pcu = 3 * Iph ** 2 * out.Rphase;
   out.Jrms = Iph / W.parallelPaths / out.turnCSA;
 
-  // 권선영역 상세 (Motor-CAD Winding 출력 대응, 기하 근사)
-  const RbW = Bore / 2, RdW = RbW + G.slotDepth;
-  const wedgeHold = W.wedgeModel === "wound" ? 0 : W.wedgeDepth; // Wound Space: 웨지 공간도 권선 가능
-  const xWedgeEnd = Math.sqrt(Math.max(RbW * RbW - (G.slotOpening / 2) ** 2, 0)) + G.toothTipDepth + wedgeHold;
+  // 권선영역 상세 (Motor-CAD Winding 출력 대응, 기하 근사) — 토폴로지(내전형/외전형) 무관
+  // 외전형은 슬롯 개구가 외경(Rag)·바닥이 안쪽(Rag−slotDepth). 내전형은 Bore/2=Rag라 값 동일(무회귀).
+  const Ropen = Rag;                                                    // 슬롯 개구 반경(양 토폴로지)
+  const wedgeHold = W.wedgeModel === "wound" ? 0 : W.wedgeDepth;        // Wound Space: 웨지 공간도 권선 가능
+  const tipChord = Ropen - Math.sqrt(Math.max(Ropen * Ropen - (G.slotOpening / 2) ** 2, 0));
+  const depthStart = G.toothTipDepth + wedgeHold - tipChord;           // 개구→권선 시작 반경깊이
+  const Rstart = outer ? Ropen - depthStart : Ropen + depthStart;      // 권선 시작 반경
+  const Rbottom = outer ? Ropen - G.slotDepth : Ropen + G.slotDepth;   // 슬롯 바닥 반경(=Rsb)
   let linedLen = 0; // 라이너가 깔리는 둘레: 치선단 코너(A3)부터 반대쪽 A3까지
   for (let i = 2; i < slotPath.length - 3; i++)
     linedLen += Math.hypot(slotPath[i + 1][0] - slotPath[i][0], slotPath[i + 1][1] - slotPath[i][1]);
   out.linerArea = linedLen * W.linerThk;
   out.wedgeArea = W.wedgeModel === "wedge" ? (G.slotOpening + 1.25) * W.wedgeDepth : 0; // 사다리꼴 평균폭 (뷰어 형상과 동일)
-  out.windingDepth = RdW - xWedgeEnd;
+  out.windingDepth = Math.max(G.slotDepth - depthStart, 0);           // = slotDepth−toothTip−wedge+tipChord (음수 방어)
   out.dividerArea = W.coilDivider * out.windingDepth;
   out.windingAreaLiner = slotA - out.wedgeArea - out.dividerArea;
   out.windingArea = out.windingAreaLiner - out.linerArea;
   out.coveredWireArea = out.condPerSlot * wireA;
   out.copperArea = out.condPerSlot * cuA;
   out.impregArea = out.windingArea - out.coveredWireArea;
-  out.wireFillWdg = out.coveredWireArea / out.windingArea;
-  out.heavyBuildFill = out.condPerSlot * W.wireDia ** 2 / out.windingArea;
+  out.wireFillWdg = out.windingArea > 0 ? out.coveredWireArea / out.windingArea : 0;
+  out.heavyBuildFill = out.windingArea > 0 ? out.condPerSlot * W.wireDia ** 2 / out.windingArea : 0;
   out.ewdgMLT = out.MLT - 2 * G.stackLength;
 
   // 동선 체적 / 엔드와인딩 충전율 (근사: 권선환형 × 반타원 오버행)
   out.volCuActive = out.turnCSA * 2 * G.stackLength * NphTotal * 3;      // mm³
   out.volCuEwdg = out.turnCSA * out.ewdgMLT * NphTotal * 3 / 2;          // mm³ (편측)
-  const RdLw = RdW - W.linerThk, xWin = xWedgeEnd + W.linerThk;
-  const ewdgRegion = Math.PI * (RdLw ** 2 - xWin ** 2) * (Math.PI * out.coilPitch / 4);
+  const rOuterW = Math.max(Rstart, Rbottom) - W.linerThk, rInnerW = Math.min(Rstart, Rbottom) + W.linerThk;
+  const ewdgRegion = Math.PI * (rOuterW ** 2 - rInnerW ** 2) * (Math.PI * out.coilPitch / 4);
   out.ewdgFill = ewdgRegion > 0 ? out.volCuEwdg * (W.wireDia / W.copperDia) ** 2 / ewdgRegion : 0;
 
   // 자속밀도 (FSCW 보정)
