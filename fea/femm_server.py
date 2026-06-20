@@ -9,6 +9,7 @@ Mini Motor-CAD ↔ FEMM 브릿지 서버
     python femm_server.py
 웹앱(localhost:5173)의 'FEMM 해석' 버튼이 http://localhost:8765/solve 로 POST.
 """
+import sys
 import math
 import cmath
 import threading
@@ -17,6 +18,24 @@ import pythoncom            # COM 초기화 (Flask 워커 스레드용)
 import femm
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+# 한글 윈도우 콘솔(cp949)에서 print의 em-dash·한글이 UnicodeEncodeError로 서버를 죽이는 것 방지
+# (python -X utf8 미사용으로 실행돼도 안전하도록 stdout/stderr를 UTF-8로 재설정).
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
+
+def _finite(v):
+    """NaN/Inf → None. Flask jsonify 기본(allow_nan=True)이 내는 NaN 토큰은 엄격 JSON 파서(node)를 깨뜨림."""
+    if isinstance(v, float):
+        return v if math.isfinite(v) else None
+    if isinstance(v, (list, tuple)):
+        return [_finite(x) for x in v]
+    return v
+
 
 app = Flask(__name__)
 CORS(app)
@@ -108,7 +127,10 @@ def build(d):
     polePitch = 360.0 / poles
     A1, A1m = sp[0], sp[-1]
     deltaDeg = math.degrees(math.atan2(A1[1], A1[0]))
-    mLo, mHi = mp[0], mp[20]
+    # 자석 반각·폴갭 아크 끝점: 고정 인덱스(mp[20]) 대신 자석 폴리의 극단 각 점에서 산정.
+    # 자석은 +x축 대칭이라 최소/최대 atan2 점이 곧 내측 호 양 끝(±magHalf) — JS 자석 분할수 변경에 견고.
+    mLo = min(mp, key=lambda p: math.atan2(p[1], p[0]))
+    mHi = max(mp, key=lambda p: math.atan2(p[1], p[0]))
     magHalfDeg = math.degrees(math.atan2(mHi[1], mHi[0]))
     if slotPitch - 2 * deltaDeg <= 1e-3:
         raise ValueError('슬롯 개구각이 슬롯피치보다 큼 (slotOpening 과대) — 형상 불가')
@@ -288,17 +310,30 @@ def sample_iron(d, sROT):
 
 @app.route('/solve', methods=['POST'])
 def solve():
-    d = request.get_json(force=True)
-    # 토폴로지 샘플 반경 (외전형 대응) — flux_linkage/airgap_bn/sample_iron/iron_loss 공용
-    _o = d.get('rotorType') == 'outer'
-    _Rl, _Rb, _Rr, _sd = d['Rlam'], d['Rb'], d['Rro'], d['slotDepth']
-    _Rag = _Rl if _o else _Rb
-    _Rsb = (_Rl - _sd) if _o else (_Rb + _sd)
-    d['_Rslotmid'] = (_Rag + _Rsb) / 2
-    d['_Rairgap'] = (_Rl + _Rr) / 2 if _o else (_Rr + _Rb) / 2
-    d['_Ryokemid'] = (_Rsb + _Rb) / 2 if _o else (_Rsb + _Rl) / 2
-    d['_Rt0'], d['_Rt1'] = min(_Rag, _Rsb), max(_Rag, _Rsb)
-    d['_Ry0'], d['_Ry1'] = (min(_Rsb, _Rb), max(_Rsb, _Rb)) if _o else (min(_Rsb, _Rl), max(_Rsb, _Rl))
+    # 입력 파싱·검증 — 잘못된 JSON/누락 키가 HTML 4xx/5xx를 내 node JSON 파서를 깨뜨리지 않도록 항상 JSON 반환.
+    try:
+        d = request.get_json(force=True, silent=True)
+        if not isinstance(d, dict):
+            return jsonify(ok=False, error='잘못된 JSON 본문 (객체 필요)'), 200
+        req = ['Ns', 'poles', 'Rlam', 'Rb', 'Rro', 'Rmi', 'slotDepth', 'Ipk', 'depth',
+               'slotPoly', 'magnetPoly', 'slotTurns']
+        miss = [k for k in req if k not in d]
+        if miss:
+            return jsonify(ok=False, error='필수 입력 누락: ' + ', '.join(miss)), 200
+        # 토폴로지 샘플 반경 (외전형 대응) — flux_linkage/airgap_bn/sample_iron/iron_loss 공용
+        _o = d.get('rotorType') == 'outer'
+        _Rl, _Rb, _Rr, _sd = d['Rlam'], d['Rb'], d['Rro'], d['slotDepth']
+        _Rag = _Rl if _o else _Rb
+        if abs(_Rr - _Rag) < 1e-3:
+            return jsonify(ok=False, error='공극 ≈ 0 (Rro와 공극면 반경 일치) — 형상/임포트 확인'), 200
+        _Rsb = (_Rl - _sd) if _o else (_Rb + _sd)
+        d['_Rslotmid'] = (_Rag + _Rsb) / 2
+        d['_Rairgap'] = (_Rl + _Rr) / 2 if _o else (_Rr + _Rb) / 2
+        d['_Ryokemid'] = (_Rsb + _Rb) / 2 if _o else (_Rsb + _Rl) / 2
+        d['_Rt0'], d['_Rt1'] = min(_Rag, _Rsb), max(_Rag, _Rsb)
+        d['_Ry0'], d['_Ry1'] = (min(_Rsb, _Rb), max(_Rsb, _Rb)) if _o else (min(_Rsb, _Rl), max(_Rsb, _Rl))
+    except Exception as e:
+        return jsonify(ok=False, error='요청 파싱 실패: ' + str(e), trace=traceback.format_exc()), 200
     print('\n[solve] 요청 수신 — Ns=%s poles=%s  topology=%s  FEMM 구동 시도...' % (d.get('Ns'), d.get('poles'), 'outer' if _o else 'inner'), flush=True)
     with _solve_lock:                       # 동시 요청 직렬화 (FEMM 단일 인스턴스)
         pythoncom.CoInitialize()            # 이 워커 스레드에서 COM 사용 준비 (FEMM ActiveX)
@@ -405,6 +440,7 @@ def solve():
             # 각 점의 Bpk(주기 최대)로 Σ Bpk²·mass[kg·T²]. 앱이 (kh·f+ke·f²)·이값 = FEA 철손.
             # 공간분포(첨두 아님)를 반영 → 앱의 "peak²×전질량" 과대평가를 cFe로 자동 보정.
             ironMassB2 = 0.0
+            ironOk = True
             try:
                 Rlam, Rb = d['Rlam'], d['Rb']
                 Wt = float(d.get('toothWidth', (2 * math.pi * Rb / Ns) * 0.5))
@@ -445,7 +481,8 @@ def solve():
                     ironMassB2 += mass * bpk[k] ** 2             # kg·T²
                 print('[solve] 철손 B²질량적분 %.5f kg·T²  (%d점 × %d스텝)' % (ironMassB2, len(samples), NT), flush=True)
             except Exception as e:
-                print('[solve] 철손적분 건너뜀:', e, flush=True)
+                ironOk = False                 # 실패를 0이 아닌 플래그로 전달(앱이 null→자체 첨두근사로 폴백)
+                print('[solve] 철손적분 건너뜀(ironOk=False):', e, flush=True)
 
             # 3) 코깅 (무전류, cogPeriod 1주기)
             cogT = []
@@ -463,15 +500,27 @@ def solve():
 
             print('[solve] 완료 — 평균토크 %.3f Nm, 리플 %.1f%%, 코깅 %.1f mNm, Bg %.3f T, Ke %.4f, Bt %.2f By %.2f'
                   % (avgT, ripT, cogPP, Bg, Ke, BtFea, ByFea), flush=True)
-            return jsonify(ok=True, avgTorque=avgT, torqueRipple=ripT,
+            payload = dict(ok=True, avgTorque=avgT, torqueRipple=ripT, torqueValid=abs(avgT) > 1e-3,
                            coggingPP=cogPP, Bg=Bg, Ke=Ke, BEMFpk=BEMFpk,
-                           Bt=BtFea, By=ByFea, Ld=Ld, Lq=Lq, ironMassB2=ironMassB2,
+                           Bt=BtFea, By=ByFea, Ld=Ld, Lq=Lq,
+                           ironMassB2=(ironMassB2 if ironOk else None), ironOk=ironOk,
                            loadT=loadT, cogT=cogT,
                            psiDeg=[math.degrees(x) for x in psi])
+            # NaN/Inf → null (엄격 JSON): jsonify 기본 NaN 토큰이 node response.json()을 깨뜨림
+            return jsonify({k: _finite(v) for k, v in payload.items()})
         except Exception as e:
-            print('[solve] 실패 ↓↓↓ (FEMM 창은 열어둠 — 화면에서 빈 영역 확인)', flush=True)
+            print('[solve] 실패 ↓↓↓', flush=True)
             print(traceback.format_exc(), flush=True)
-            # 진단을 위해 FEMM 창을 닫지 않음 (성공시에는 위에서 닫음)
+            # 다음 요청을 위해 FEMM 문서 정리 — 전역 단일 인스턴스라 안 닫으면 반쯤 빌드된 모델 위에
+            # 다음 solve가 덧쌓여 조용히 틀린 형상으로 풀린다(정리 실패는 무시, 원오류 보존).
+            try:
+                femm.mo_close()
+            except Exception:
+                pass
+            try:
+                femm.mi_close()
+            except Exception:
+                pass
             return jsonify(ok=False, error=str(e), trace=traceback.format_exc())
         finally:
             pythoncom.CoUninitialize()
