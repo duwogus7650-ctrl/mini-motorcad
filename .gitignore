@@ -10,3 +10,8 @@ __pycache__
 # 대용량 비디오 / 임시·진단 산출물 (git 본체에 넣지 않음)
 *.mp4
 tools/_*
+
+# 플러그인(bkit·oh-my-claudecode) 로컬 상태 디렉터리
+.bkit/
+.omc/
+app/.omc/

@@ -148,3 +148,26 @@
 - SlotViewer·packConductors: 외전형은 **공극면 반경의 내전형 등가 슬롯**으로 처리(statorBore=statorLamDia·
   rotorType=inner). 치수·도체패킹 동일 → 검증된 경로 재사용, 단일슬롯 상세는 반사 전 형상으로 충분.
 - **외전형 지원 완료**: 임포트·형상·compute·GeometryTab렌더·FEMM·권선뷰·슬롯뷰 전부. 내전형 전 구간 무회귀.
+
+## 2026-06-20 — 전면 재검토(Opus 리뷰어 2 + 직접검증) → HIGH+MEDIUM 수정
+
+- **재검토 = 추측이 아니라 기존 검증 스위트 실행이 1차 증거**: validate_engine·verify_400w(효율 92.52% −0.1%)·
+  verify_aedt(11개 🟢)·verify_autofit 모두 통과 재확인. verify_fit "크래시"는 회귀 아님 = DXF·AEDT 경로 인자
+  필요한 CLI를 인자 없이 돌린 것(usage 가드 없음). 🔴 라벨만 보고 회귀로 단정 말 것 — 무보정 λ −18%는 설계대로.
+- **[버그] 외전형 권선면적이 내전형 보어(Bore/2)를 무조건 사용**(App.jsx compute 권선영역 블록). 외전형 슬롯개구는
+  Rag=statorLamDia/2인데 Bore는 내측 마운팅홀 → windingDepth·windingArea·fill·AC동손(mLayer)·효율이 외전형서
+  조용히 틀림(나머지 compute는 토폴로지 반경 Rt0/Rt1 쓰는데 이 블록만 섬). **수정: 개구반경 Ropen=Rag +
+  depthStart(=toothTip+wedge−tipChord) 기반으로 재작성, outer면 Rag−깊이·inner면 Rag+깊이.** 내전형 수학적
+  동일(windingDepth 12.70·windingArea 132.14 불변 확인), 외전형 7.98/32.79 양수 정상. 외전형 토크·λ는 FEMM
+  경로라 영향 없었음(검증된 OuterType 결과 유효). 교훈: 토폴로지 분기는 "한 곳이라도 구식 가정(Bore=개구)이
+  남으면" 조용히 샌다 — 토폴로지 무관 식으로 통일하고 내전형 무회귀를 수치로 증명.
+- **[견고성] FEMM 브릿지 응답계약**: ① jsonify 기본 allow_nan=True → FEMM이 NaN 내면 `{"x":NaN}` 비표준 JSON →
+  node response.json() 깨짐. _finite(NaN→null) + dict 살균 후 반환. ② get_json(force=True)·필수키 접근이 try
+  밖 → 잘못된 입력이 HTML 4xx/5xx → 파서 깨짐. **파싱·필수키·공극≈0 검증을 try로 감싸 항상 JSON 반환**(실제
+  curl로 'not json'·{Ns:18} → 정상 JSON 에러 확인). ③ 예외 시 FEMM 문서 미닫음 → 전역 단일 인스턴스에 다음
+  solve가 덧쌓여 조용히 틀린 형상 → except에서 mo/mi_close. ④ 철손적분 실패 시 0.0 반환(=계산된 0과 구분불가)
+  → ironOk 플래그 + null(앱이 Number.isFinite&&>0 가드로 자체 폴백). ⑤ mp[20] 매직인덱스(JS 자석분할수와 암묵
+  계약) → 자석폴리 최대|atan2| 점으로 견고화(±x 대칭이라 극단각=내측호 끝, 분할수 변경 무관).
+- **수치·가드 보강**(내전형 불변): Carter 계수 g≈0/광폭개구 분모≤0 → gC·Math.max 가드, 효율 음수/100%↑ 클램프,
+  noLoadSpeed(lam≈0)·Te(Rphase=0) Infinity 가드, 외전형 공극 미추출 경고. 교훈: 사용자 입력 엣지에서 NaN/∞를
+  사실처럼 표시하지 않도록 "표시 직전 유한성 가드"(CLAUDE.md 자기검증). 검증도구 tools/_diag_winding.mjs 추가.
