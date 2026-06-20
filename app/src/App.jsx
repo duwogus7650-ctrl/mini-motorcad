@@ -2307,10 +2307,10 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
           <div className="rounded mt-2" style={{ border: "1px solid #1B7A2B", background: "#0c1424" }}>
             <div className="px-2 py-1 text-xs font-bold" style={{ color: "#1B7A2B", borderBottom: "1px solid #22304d" }}>FEMM 기반 성능 (FEA)</div>
             <table className="w-full"><tbody>
-              <Row label="평균 토크 (FEA)" value={femmRes.avgTorque.toFixed(3)} unit="Nm" hl />
-              <Row label="토크 리플 (FEA)" value={femmRes.torqueRipple.toFixed(2)} unit="%" />
-              <Row label="코깅 p-p (FEA) ⚠ 메시한계·참고만" value={femmRes.coggingPP.toFixed(1)} unit="mNm" />
-              <Row label="에어갭 자속밀도 (FEA)" value={femmRes.Bg.toFixed(3)} unit="T" />
+              <Row label="평균 토크 (FEA)" value={fmt(femmRes.avgTorque, 3)} unit="Nm" hl />
+              <Row label="토크 리플 (FEA)" value={fmt(femmRes.torqueRipple, 2)} unit="%" />
+              <Row label="코깅 p-p (FEA) ⚠ 메시한계·참고만" value={fmt(femmRes.coggingPP, 1)} unit="mNm" />
+              <Row label="에어갭 자속밀도 (FEA)" value={fmt(femmRes.Bg, 3)} unit="T" />
               {Number.isFinite(femmRes.Ke) && <Row label="역기전력 상수 Ke (FEA)" value={femmRes.Ke.toFixed(4)} unit="V·s/rad" />}
               {Number.isFinite(femmRes.BEMFpk) && <Row label="무부하 역기전력 피크 (FEA)" value={femmRes.BEMFpk.toFixed(2)} unit="V" />}
               {Number.isFinite(femmRes.Bt) && <Row label="치 자속밀도 (FEA, 부하)" value={femmRes.Bt.toFixed(3)} unit="T" />}
