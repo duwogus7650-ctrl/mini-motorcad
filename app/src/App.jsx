@@ -388,6 +388,7 @@ function parseAedt(text) {
   set(geo, "statorLamDia", D_so, "statorLamDia(D_so)");
   set(geo, "statorBore", D_si, "statorBore(D_si)");
   set(geo, "airgap", g ?? (!outer && D_si !== undefined && D_ro !== undefined ? (D_si - D_ro) / 2 : undefined), "airgap(g)");
+  if (outer && g === undefined) warnings.push("외전형 공극(g) 미추출 — 기존 airgap 값 유지(반경 도출 불가, 확인 필요)");
   set(geo, "shaftDia", V("D_shaft", "D_sh"), "shaftDia(D_shaft)");
   set(geo, "slotNumber", N_slot !== undefined ? Math.round(N_slot) : undefined, "slotNumber(N_slot)");
   set(geo, "poleNumber", N_pole !== undefined ? Math.round(N_pole) : undefined, "poleNumber(N_pole)");
@@ -689,9 +690,10 @@ function compute(G, W, M, C, cal) {
   // 자석/공극
   const Br = mag.Br20 * (1 + mag.tc / 100 * (C.Tmag - 20));
   const taus = Math.PI * 2 * Rag / Ns;   // 공극면 슬롯피치 (외전형은 외경 기준)
-  const gam = (G.slotOpening / g) ** 2 / (5 + G.slotOpening / g);
-  const kc = taus / (taus - gam * g);
-  const Bgpk = Br * lm / (lm + mag.mur * kc * g);
+  const gC = g > 1e-6 ? g : 1e-6;        // 공극 0 방어(g≈0서 Carter 발산 방지)
+  const gam = (G.slotOpening / gC) ** 2 / (5 + G.slotOpening / gC);
+  const kc = taus / Math.max(taus - gam * gC, 1e-6);  // 광폭 개구서 분모≤0 → NaN/음수 방어
+  const Bgpk = Br * lm / (lm + mag.mur * kc * gC);
   out.Br_used = Br; out.kc = kc; out.Bgpk = Bgpk;
 
   // 권선
@@ -828,13 +830,14 @@ function compute(G, W, M, C, cal) {
   out.Pin = out.Pem + out.PcuAC;
   out.Pout = out.Pem - out.Pfe - C.otherLoss;
   out.Tshaft = wm > 0 ? out.Pout / wm : 0;
-  out.eff = out.Pin > 0 ? (out.Pout / out.Pin) * 100 : 0;
+  // 효율: 입력·출력 모두 양(+)일 때만 의미. 손실>Pem(저속고손실)·회생영역은 0으로(음수/100%↑ 비표시).
+  out.eff = (out.Pin > 0 && out.Pout > 0) ? Math.min((out.Pout / out.Pin) * 100, 100) : 0;
   out.TRV = out.torque / (Math.PI * RoM ** 2 * Lstk * 1e-9) / 1000; // kNm/m³
   out.rotorPeriphV = wm * RoM * 1e-3;                          // 회전자 외주 선속도 [m/s]
 
   // 전압/무부하속도 (정현 구동, SVPWM 가정)
   const VphAvail = W.connection === "delta" ? C.Vdc : C.Vdc / Math.sqrt(3);
-  out.noLoadSpeed = (VphAvail / (2 * Math.PI * lam)) * 60 / pp;
+  out.noLoadSpeed = lam > 1e-9 ? (VphAvail / (2 * Math.PI * lam)) * 60 / pp : 0; // lam≈0(퇴화권선) Infinity 방어
 
   // 인덕턴스 (참고 추정치 — 보정계수 포함)
   const geff = (kc * g + lm / mag.mur) * 1e-3;
@@ -874,7 +877,7 @@ function compute(G, W, M, C, cal) {
 
   // 파생량 (Motor-CAD Output Data 항목)
   out.Km = out.Pcu > 0 ? out.torque / Math.sqrt(out.Pcu) : 0;
-  out.Te = (out.Lq * 1e-3 / out.Rphase) * 1e3;
+  out.Te = out.Rphase > 0 ? (out.Lq * 1e-3 / out.Rphase) * 1e3 : 0; // Rphase=0(턴/도선 0) Infinity 방어
   const gcd = (a, b) => (b ? gcd(b, a % b) : a);
   const lcmSP = (Ns * poles) / gcd(Ns, poles);
   out.coggingPeriod = 360 / lcmSP;
