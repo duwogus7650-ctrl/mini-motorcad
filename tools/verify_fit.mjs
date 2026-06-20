@@ -66,6 +66,12 @@ function densify(pts, step, closeIt) {
 // ── 입력 ────────────────────────────────────────────────────────
 const dxfPath = process.argv[2], aedtPath = process.argv[3], TOL = parseFloat(process.argv[4] || "0.3");
 const forceBottom = process.argv[5]; // 자기검증용: "arc"|"straight" 강제
+if (!dxfPath || !aedtPath) {
+  console.log("사용법: node tools/verify_fit.mjs <DXF경로> <AEDT경로> [공차mm=0.3] [arc|straight]");
+  console.log('  예: node tools/verify_fit.mjs "C:/Users/user/Desktop/dxf 파일/1250W.dxf" "C:/Users/user/Desktop/aedt파일/750W,1200W.aedt"');
+  console.log("  (DXF·AEDT는 .gitignore 대상이라 저장소에 없음 — 바탕화면 폴더에서 경로 지정)");
+  process.exit(2);
+}
 const shapes = parseDxf(readFileSync(dxfPath, "latin1"));
 const ex = parseAedt(readFileSync(aedtPath, "latin1"));
 const P = { bandingThickness: 0, statorRot: 0, rotorRot: 0, ...ex.geo };

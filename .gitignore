@@ -1,5 +1,6 @@
 node_modules
-dist
+# 루트 dist만 무시 — app/dist는 오프라인 Python 실행(run_offline.py)을 위해 저장소에 포함.
+/dist
 *.dxf
 *.aedt
 *.mot

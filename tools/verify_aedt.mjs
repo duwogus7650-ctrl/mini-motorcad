@@ -32,6 +32,7 @@ const fin = (v) => Number.isFinite(v);
 const CRIT = [["slotNumber", "슬롯"], ["poleNumber", "극"], ["statorBore", "보어"], ["statorLamDia", "외경"], ["airgap", "에어갭"], ["magnetThickness", "자석두께"], ["stackLength", "축길이"]];
 let pass = 0, partial = 0, fail = 0;
 const summary = [];
+const metrics = [];   // 일반화 게이트용: 모터별 (λ,T,Bg,kw1) 수집
 
 for (const fp of files) {
   const name = fp.split(/[\\/]/).pop();
@@ -61,7 +62,7 @@ for (const fp of files) {
   let buildOK = "—", computeOK = "—", perf = "";
   try { const sp = buildSlotPath(geo), mp = buildMagnetPath(geo); buildOK = (sp.every((p) => fin(p[0]) && fin(p[1])) && mp.every((p) => fin(p[0]) && fin(p[1]))) ? "✓" : "✗NaN좌표"; }
   catch (e) { buildOK = "✗" + e.message.slice(0, 30); }
-  try { const o = compute(geo, wind, MAT0, CALC0, null); computeOK = (fin(o.torque) && fin(o.eff) && fin(o.Bgpk)) ? "✓" : "✗NaN"; perf = `Bg=${o.Bgpk?.toFixed(2)}T λ=${(o.lambda * 1000)?.toFixed(1)}mVs T=${o.torque?.toFixed(2)}Nm`; }
+  try { const o = compute(geo, wind, MAT0, CALC0, null); computeOK = (fin(o.torque) && fin(o.eff) && fin(o.Bgpk)) ? "✓" : "✗NaN"; perf = `Bg=${o.Bgpk?.toFixed(2)}T λ=${(o.lambda * 1000)?.toFixed(1)}mVs T=${o.torque?.toFixed(2)}Nm`; if (computeOK === "✓") metrics.push({ name, lam: o.lambda * 1000, T: o.torque, Bg: o.Bgpk, kw1: o.kw1 }); }
   catch (e) { computeOK = "✗" + e.message.slice(0, 30); }
 
   const ok = missCrit.length === 0 && badChk.length === 0 && buildOK === "✓" && computeOK === "✓";
@@ -81,3 +82,29 @@ for (const fp of files) {
 console.log("\n════════ 요약 ════════");
 for (const [n, m, s] of summary) console.log(`${m} ${n.padEnd(42)} ${s}`);
 console.log(`\n🟢 임포트 정상 ${pass} · 🟡 일부누락 ${partial} · 🔴 불가/문제 ${fail}  (총 ${files.length})`);
+
+// ── 일반화 게이트: "다른 모터 = 다른 결과" + 물리 타당성 (400W/1250W 과적합 아님 증명) ──
+console.log("\n════════ 일반화 게이트 (형상 반응성 + 타당성) ════════");
+let genFail = 0;
+for (const m of metrics) {
+  const bad = [];
+  if (!(m.lam > 0)) bad.push(`λ≤0(${m.lam.toFixed(2)})`);
+  if (!(m.T > 0)) bad.push(`T≤0(${m.T.toFixed(2)})`);
+  if (!(m.Bg > 0 && m.Bg <= 2.5)) bad.push(`Bg범위(${m.Bg.toFixed(2)})`);
+  if (!(m.kw1 > 0 && m.kw1 <= 1.0001)) bad.push(`kw1범위(${m.kw1.toFixed(3)})`);
+  if (bad.length) { console.log(`🔴 ${m.name}: ${bad.join(" ")}`); genFail++; }
+}
+if (!genFail && metrics.length) console.log(`🟢 타당성: ${metrics.length}개 모터 전부 물리범위(λ>0·T>0·0<Bg≤2.5T·0<kw1≤1)`);
+if (metrics.length >= 3) {
+  const lams = metrics.map((m) => m.lam);
+  const mean = lams.reduce((a, b) => a + b, 0) / lams.length;
+  const sd = Math.sqrt(lams.reduce((a, b) => a + (b - mean) ** 2, 0) / lams.length);
+  const cv = mean > 0 ? sd / mean : 0;
+  const uniq = new Set(lams.map((v) => v.toFixed(1))).size;
+  console.log(`λ 분포: ${lams.length}개 중 고유 ${uniq}개 · ${Math.min(...lams).toFixed(1)}~${Math.max(...lams).toFixed(1)}mVs · 변동계수 CV=${(cv * 100).toFixed(0)}%`);
+  const distinctOK = uniq >= Math.ceil(metrics.length * 0.7) && cv > 0.15;
+  console.log(distinctOK ? "🟢 distinctness: 서로 다른 모터 = 서로 다른 λ (형상에 반응, 과적합 아님)" : "🔴 distinctness: 결과가 형상에 충분히 반응 안 함(과적합/하드코딩 의심)");
+  if (!distinctOK) genFail++;
+}
+console.log(genFail ? `\n❌ 일반화 게이트 실패 (${genFail}건)` : "\n✅ 일반화 게이트 통과 — 다른 모터는 다른 결과를 낸다");
+process.exit(genFail ? 1 : 0);

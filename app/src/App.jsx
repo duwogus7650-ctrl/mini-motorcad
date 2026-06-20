@@ -1394,7 +1394,7 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
     if (cv.width !== Wd * dpr) { cv.width = Wd * dpr; cv.height = H * dpr; }
     const V = viewRef.current;
     if (!V.init) { V.ox = Wd / 2; V.oy = H / 2; V.scale = Math.min(Wd, H) / 130; V.init = true; }
-    const ctx = cv.getContext("2d");
+    const ctx = cv.getContext("2d"); if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#0a1120"; ctx.fillRect(0, 0, Wd, H);
     // 그리드
@@ -1835,7 +1835,7 @@ function SlotViewer({ geo, wind, res }) {
     const dpr = window.devicePixelRatio || 1;
     const W = wrap.clientWidth, H = wrap.clientHeight;
     cv.width = W * dpr; cv.height = H * dpr;
-    const ctx = cv.getContext("2d");
+    const ctx = cv.getContext("2d"); if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#0a1120"; ctx.fillRect(0, 0, W, H);
 
@@ -2981,7 +2981,7 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
   }, [geo, wind, calc, res, therm]);
   if (!solved) return <div className="p-6 text-sm" style={{ color: "#7e8eac" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 누른 뒤 표시됩니다 (손실값 필요).</div>;
   if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
-  const Row = ({ k, v, u, c }) => (
+  const TRow = ({ k, v, u, c }) => (   // ThermalTab 전용 행(U1: 모듈 Row 섀도잉 제거 위해 개명)
     <div className="flex items-center justify-between px-2 py-1 text-xs" style={{ borderTop: "1px solid #22304d" }}>
       <span style={{ color: "#7e8eac" }}>{k}</span>
       <span style={{ fontFamily: "JetBrains Mono,Consolas,monospace", fontWeight: 600, color: c || "#e6edf7" }}>{v}{u && <span style={{ color: "#7e8eac", fontWeight: 400 }}> {u}</span>}</span>
@@ -3039,23 +3039,23 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
             <div className="text-xs" style={{ color: "#7e8eac" }}>권선 핫스팟 포화온도 (예측)</div>
             <div style={{ fontSize: 30, fontWeight: 700, color: data.hot > 130 ? "#ff5d6c" : "#2bd47a", fontFamily: "JetBrains Mono,Consolas,monospace" }}>{fmt(data.hot, 1)} °C</div>
           </div>
-          <Row k="권선 핫스팟" v={fmt(data.hot, 1)} u="°C" c="#B02020" />
-          <Row k="엔드와인딩" v={data.T[1].toFixed(1)} u="°C" c={data.T[1] >= data.T[0] ? "#B02020" : undefined} />
-          <Row k="활성권선(슬롯)" v={data.T[0].toFixed(1)} u="°C" />
-          <Row k="스테이터 철심" v={data.T[2].toFixed(1)} u="°C" />
-          <Row k="하우징" v={data.T[3].toFixed(1)} u="°C" />
-          <Row k="자석 (PM)" v={data.T[4].toFixed(1)} u="°C" c="#1B5E20" />
-          <Row k="로터" v={data.T[5].toFixed(1)} u="°C" />
-          <Row k="주위" v={therm.ambient.toFixed(1)} u="°C" />
-          <Row k="총 발열 Q" v={data.Qtot.toFixed(1)} u="W" />
+          <TRow k="권선 핫스팟" v={fmt(data.hot, 1)} u="°C" c="#B02020" />
+          <TRow k="엔드와인딩" v={data.T[1].toFixed(1)} u="°C" c={data.T[1] >= data.T[0] ? "#B02020" : undefined} />
+          <TRow k="활성권선(슬롯)" v={data.T[0].toFixed(1)} u="°C" />
+          <TRow k="스테이터 철심" v={data.T[2].toFixed(1)} u="°C" />
+          <TRow k="하우징" v={data.T[3].toFixed(1)} u="°C" />
+          <TRow k="자석 (PM)" v={data.T[4].toFixed(1)} u="°C" c="#1B5E20" />
+          <TRow k="로터" v={data.T[5].toFixed(1)} u="°C" />
+          <TRow k="주위" v={therm.ambient.toFixed(1)} u="°C" />
+          <TRow k="총 발열 Q" v={data.Qtot.toFixed(1)} u="W" />
           <div className="px-2 py-1 text-xs font-bold" style={{ borderTop: "2px solid #22304d", background: "#0c1424" }}>열저항 / 하우징</div>
-          <Row k="활성권선→철심 R" v={data.Rslot.toFixed(3)} u="K/W" />
-          <Row k="엔드→하우징 R" v={data.Rendair.toFixed(3)} u="K/W" />
-          <Row k="철심→하우징 R" v={data.Ryoke.toFixed(3)} u="K/W" />
-          <Row k="하우징→공기 R" v={data.Rconv.toFixed(3)} u="K/W" />
-          <Row k="에어갭 R" v={data.Rgap.toFixed(3)} u="K/W" />
-          <Row k="하우징(사용)" v={data.Dh.toFixed(0) + "×" + data.Lh.toFixed(0)} u="mm" />
-          <Row k="열 시정수 τ" v={fmt(data.tau / 60, 1)} u="분" />
+          <TRow k="활성권선→철심 R" v={data.Rslot.toFixed(3)} u="K/W" />
+          <TRow k="엔드→하우징 R" v={data.Rendair.toFixed(3)} u="K/W" />
+          <TRow k="철심→하우징 R" v={data.Ryoke.toFixed(3)} u="K/W" />
+          <TRow k="하우징→공기 R" v={data.Rconv.toFixed(3)} u="K/W" />
+          <TRow k="에어갭 R" v={data.Rgap.toFixed(3)} u="K/W" />
+          <TRow k="하우징(사용)" v={data.Dh.toFixed(0) + "×" + data.Lh.toFixed(0)} u="mm" />
+          <TRow k="열 시정수 τ" v={fmt(data.tau / 60, 1)} u="분" />
         </div>
         {data.hot > 130 && <div className="text-xs mt-1 px-1" style={{ color: "#B02020" }}>⚠ 권선 핫스팟 과다 — 이 냉각방식으론 연속정격 불가. 강제공냉/전도방열 또는 하우징 확대 필요.</div>}
         {data.T[4] > 120 && <div className="text-xs mt-1 px-1" style={{ color: "#B02020" }}>⚠ 자석온도 {data.T[4].toFixed(0)}°C — 감자 위험. 자석 등급(내열) 확인.</div>}
