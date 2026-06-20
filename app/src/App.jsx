@@ -827,14 +827,18 @@ function compute(G, W, M, C, cal) {
   // AC 동손 (근접효과 근사, fe² 스케일) — cAC로 kro80 FEA 캘리브레이션. 슬롯 깊이방향 층수 기반.
   const deltaSkin = Math.sqrt(rho / (Math.PI * Math.max(fe, 1e-6) * MU0));            // 표피깊이 [m] (fe=0→Infinity 방어)
   const xiAC = (W.copperDia * 1e-3) / deltaSkin;                     // 환산높이 ξ = d/δ
-  const mLayer = Math.max(1, Math.round(out.windingDepth / W.wireDia)); // 슬롯깊이 방향 도체 층수
+  const mLayer = Math.max(1, Math.ceil(out.windingDepth / W.wireDia)); // 슬롯깊이 방향 도체 층수(부분층도 1층으로 — 근접손 과소평가 방지)
   const cAC = Number.isFinite(C.cAC) ? C.cAC : 1;                    // 빈칸/미정의 방어
+  // 근접효과 근사: 두 항 모두 ξ⁴(∝fe²) — 저주파 ξ<~1서 유효. 고fe서 skin O(ξ) 누락분은 cAC로 보정.
+  // RacRdc−1 ∝ ξ⁴ ∝ fe²라 효율맵의 fe² 외삽(kac=1+kacRated·(n/nRated)²)과 내부 일관.
   out.RacRdc = 1 + cAC * (((mLayer * mLayer - 1) / 3) * (xiAC ** 4 / 3) + (4 / 45) * xiAC ** 4);
   out.PcuAC = out.Pcu * out.RacRdc;        // 총 동손(AC 포함)
   out.PcuAddl = out.Pcu * (out.RacRdc - 1); // AC 추가분
 
   // 철손 / 효율 — cFe: 단순 Steinmetz(peak-B²)는 고B·후막 적층서 FEA/실측 대비 과대 → 모터별 보정(기본 1).
   const cFe = (cal && Number.isFinite(cal.cFe)) ? cal.cFe : (Number.isFinite(C.cFe) ? C.cFe : 1);  // FEMM 철손적분 보정 우선
+  // 철손: 운전점 자속(Bt/By) 직접 사용(명판 기준). 효율맵은 약계자 영역서 자속감소(fluxR²)를 추가 반영하므로
+  // 진각≠0·고속 셀에선 효율맵 Pfe < 운전점 Pfe로 의도적으로 다를 수 있음(둘 다 근사).
   out.Pfe = cFe * (stl.kh * fe + stl.ke * fe ** 2) * (out.mTooth * out.Bt ** 2 + out.mBy * out.By ** 2);
   const wm = C.speed * 2 * Math.PI / 60;
   out.Pem = out.torque * wm;
@@ -971,17 +975,24 @@ const Row = ({ label, value, unit, refv, hl }) => (
   </tr>
 );
 
-const NumIn = ({ label, value, onChange, step = 0.01, w = "w-20" }) => (
-  <div className="flex items-center justify-between gap-1 px-2 py-1" style={{ borderTop: `1px solid ${UI.border}` }}>
-    <span className="text-xs whitespace-nowrap" style={{ color: UI.label }}>{label}</span>
-    <input type="number" step={step} value={value}
-      onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-      className={`${w} text-right text-xs px-1.5 py-0.5 rounded outline-none`}
-      style={{ border: `1px solid ${UI.border}`, background: UI.inset, color: UI.head, fontFamily: UI.mono }}
-      onFocus={(e) => (e.target.style.borderColor = UI.cyan)}
-      onBlur={(e) => (e.target.style.borderColor = UI.border)} />
-  </div>
-);
+const NumIn = ({ label, value, onChange, step = 0.01, w = "w-20" }) => {
+  // 문자열 버퍼: 편집 중 빈칸·"-"·"1." 같은 중간 입력을 허용(controlled number가 0으로 강제하던 마찰 제거).
+  // 유한값일 때만 부모에 커밋. 외부에서 value가 바뀌면(DXF 자동적용 등) 비포커스 시 동기화.
+  const [txt, setTxt] = useState(String(value));
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setTxt(String(value)); }, [value]);
+  return (
+    <div className="flex items-center justify-between gap-1 px-2 py-1" style={{ borderTop: `1px solid ${UI.border}` }}>
+      <span className="text-xs whitespace-nowrap" style={{ color: UI.label }}>{label}</span>
+      <input type="number" step={step} value={txt}
+        onChange={(e) => { setTxt(e.target.value); const n = parseFloat(e.target.value); if (Number.isFinite(n)) onChange(n); }}
+        className={`${w} text-right text-xs px-1.5 py-0.5 rounded outline-none`}
+        style={{ border: `1px solid ${UI.border}`, background: UI.inset, color: UI.head, fontFamily: UI.mono }}
+        onFocus={(e) => { focused.current = true; e.target.style.borderColor = UI.cyan; }}
+        onBlur={(e) => { focused.current = false; setTxt(String(value)); e.target.style.borderColor = UI.border; }} />
+    </div>
+  );
+};
 const Radio = ({ val, label, cur, onPick, disabled }) => {
   const on = cur === val;
   return (
@@ -2003,7 +2014,7 @@ function WindingTab({ geo, wind, sW, res, showRef }) {
         {wireType !== "direct" && (
           <div className="flex items-center justify-between gap-1 px-2 py-0.5" style={{ borderTop: "1px solid #22304d" }}>
             <span className="text-xs">Gauge</span>
-            <select value=""
+            <select value="" aria-label="와이어 게이지 선택 (선택 시 적용 후 초기화되는 액션 피커)"
               onChange={(e) => {
                 const w = WIRE_TABLES[wireType][+e.target.value];
                 if (w) { sW("copperDia", w.cu); sW("wireDia", w.cov); }
