@@ -1,7 +1,7 @@
 // 400W 10P12S 모터를 앱 compute()에 넣어 Motor-CAD 실해석(영상 캡처) 기준값과 대조.
 // 형상: 영상 Geometry 탭(sc_002) / 재질·권선: 400W_10P12S_v1.mot / 운전점: Calculation 탭(a_05).
 // compute()는 App.jsx에서 직접 eval 추출 → 실제 코드를 검증(드리프트 방지, verify_fit.mjs와 동일 기법).
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 const src = readFileSync("app/src/App.jsx", "utf8");
 const slice = (a, b) => { const i = src.indexOf(a), j = src.indexOf(b, i + 1); if (i < 0 || j < 0) throw new Error("slice 실패: " + a); return src.slice(i, j); };
 const G = (s, from, to) => eval(slice(from, to).replace(from, "globalThis." + s + " = " + (from.startsWith("function") ? from.replace(/^function\s+\w+/, "function " + s) : "")));
@@ -95,3 +95,26 @@ row("고정자 철손 Pfe", oF.Pfe, 6.473, "W", "(cFe=0.566 → MC 실측 일치
 row("Output power", oF.Pout, REF.Pout, "W");
 row("Efficiency", oF.eff, REF.eff, "%");
 console.log("");
+
+// ── feedback-runner 계약 방출 (기본 OFF; FB_EMIT=1 일 때만) ────────
+// 각 지표를 "검증된 경로"에서 뽑는다: 운동학=해석식(보정무관), λ의존=λ주입(oCal), 손실/효율=FEMM+.mot 전체보정(oF).
+if (process.env.FB_EMIT) {
+  const dir = process.env.FB_DIR || "tools/.fb400";
+  mkdirSync(dir, { recursive: true });
+  const results = {
+    fe: o.fe, coggingFreq: o.coggingFreq,
+    // app Kt는 RMS전류 기준(T/Irms); Motor-CAD는 peak전류 기준(T/Ipk). Kt_rms=√2·Kt_peak → 동일 규약으로 환산해 비교.
+    lambda_mVs: oCal.lambda * 1000, torque: oCal.torque, Kt_phase: oCal.Kt_phase / Math.SQRT2,
+    Vterm: oCal.Vterm, noLoadSpeed: oCal.noLoadSpeed,
+    Pcu: oF.Pcu, Pfe: oF.Pfe, Pout: oF.Pout, eff: oF.eff,
+  };
+  const oracle = {
+    fe: REF.fe, coggingFreq: REF.coggingFreq,
+    lambda_mVs: REF.lambda_mVs, torque: REF.torque, Kt_phase: REF.Kt_phase,
+    Vterm: REF.Vterm, noLoadSpeed: REF.noLoadSpeed,
+    Pcu: 23.15, Pfe: 6.473, Pout: REF.Pout, eff: REF.eff,
+  };
+  writeFileSync(`${dir}/results.json`, JSON.stringify(results, null, 2));
+  writeFileSync(`${dir}/oracle.json`, JSON.stringify(oracle, null, 2));
+  console.log(`[FB_EMIT] wrote ${dir}/results.json + oracle.json (${Object.keys(results).length} metrics)`);
+}

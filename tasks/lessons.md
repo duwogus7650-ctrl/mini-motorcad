@@ -171,3 +171,13 @@
 - **수치·가드 보강**(내전형 불변): Carter 계수 g≈0/광폭개구 분모≤0 → gC·Math.max 가드, 효율 음수/100%↑ 클램프,
   noLoadSpeed(lam≈0)·Te(Rphase=0) Infinity 가드, 외전형 공극 미추출 경고. 교훈: 사용자 입력 엣지에서 NaN/∞를
   사실처럼 표시하지 않도록 "표시 직전 유한성 가드"(CLAUDE.md 자기검증). 검증도구 tools/_diag_winding.mjs 추가.
+
+## 2026-06-21 — feedback-runner 검증 루프 실연결
+
+- feedback-runner(스킬)를 verify_400w.mjs에 `FB_EMIT=1` 게이트로 연결 →
+  results.json/oracle.json 계약 방출 → runner가 11지표 회귀게이트(exit 0/2)로 판정.
+  기본 동작은 git stash 대조로 바이트 동일 확인(게이트 OFF시 무영향). 왜: 솔버 수치를
+  "맞다"고 단언하지 말고 PASS 판정으로 증명(CLAUDE.md 자기검증). 산출물 tools/.fb400/는 gitignore.
+- Kt 규약 함정 재확인: app Kt=T/Irms, Motor-CAD Kt=T/Ipeak → Kt_rms=√2·Kt_peak.
+  토크는 0.2% 일치하는데 Kt만 +42% 어긋나면 솔버버그가 아니라 전류규약 불일치.
+  비교 전 동일 규약으로 환산(÷√2)해야 like-for-like. (메모리 motorcad-400w-video-verification)
