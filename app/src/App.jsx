@@ -377,7 +377,7 @@ function parseAedt(text) {
     return expr();
   }
   // 후보 이름 중 첫 평가 성공값 (없으면 undefined)
-  const V = (...names) => { for (const n of names) { try { const v = evalVar(n, new Set()); if (isFinite(v)) return v; } catch (e) { /* skip */ } } return undefined; };
+  const V = (...names) => { for (const n of names) { try { const v = evalVar(n, new Set()); if (isFinite(v)) return v; } catch { /* skip */ } } return undefined; };
 
   const D_ro = V("D_ro"), T_m = V("T_m"), g = V("g"), D_so = V("D_so"), T_Yoke = V("T_Yoke");
   const N_slot = V("N_slot", "Slots"), N_pole = V("N_pole", "Poles"), a_m = V("a_m", "Embrace");
@@ -449,7 +449,7 @@ function parseAedt(text) {
         wind.strands = 1; wind.copperDia = +dCu.toFixed(3); wind.wireDia = +(dCu / 0.9).toFixed(3);
         applied.push(`와이어 자동(Ø${wind.wireDia}·1가닥${fitOK ? ", 슬롯에 맞춤" : ", 슬롯한계"})`);
       }
-    } catch (e) { /* 형상 불완전 시 와이어 유지 */ }
+    } catch { /* 형상 불완전 시 와이어 유지 */ }
   }
 
   // 외전형(아우터로터) 감지: D_ro>D_so 면 로터가 스테이터 바깥 → 내전형 가정 모델과 형상 모순.
@@ -982,7 +982,7 @@ const NumIn = ({ label, value, onChange, step = 0.01, w = "w-20" }) => (
       onBlur={(e) => (e.target.style.borderColor = UI.border)} />
   </div>
 );
-const Radio = ({ group, val, label, cur, onPick, disabled }) => {
+const Radio = ({ val, label, cur, onPick, disabled }) => {
   const on = cur === val;
   return (
     <label className={"flex items-center gap-2 text-xs py-1 px-2 rounded " + (disabled ? "opacity-40" : "cursor-pointer")}
@@ -995,6 +995,35 @@ const Radio = ({ group, val, label, cur, onPick, disabled }) => {
 };
 const SectionHead = ({ color, children }) => (
   <div className="px-3 py-1.5 text-xs font-semibold" style={{ background: UI.panel2, borderLeft: `3px solid ${color}`, color: UI.head, letterSpacing: "0.06em", borderTopRightRadius: 6 }}>{children}</div>
+);
+// 표시 헬퍼(모듈 레벨 — 렌더마다 새 컴포넌트 타입 생성 방지[no-unstable-nested-components]). 부모 캡처값은 props로.
+const TR = ({ children, total }) => (   // MaterialsTab 표 행
+  <tr style={{ borderTop: "1px solid #22304d", background: total ? "#0c1424" : undefined }}>{children}</tr>
+);
+const Tbl = ({ children, showRef }) => (   // OutputTab 표 (showRef로 Motor-CAD 비교열)
+  <div className="rounded flex-1 min-w-80" style={{ background: "#101a30", border: "1px solid #22304d" }}>
+    <table className="w-full">
+      <thead><tr style={{ background: "#0c1424" }}>
+        <th className="px-2 py-1.5 text-xs text-left font-semibold">Variable</th>
+        <th className="px-2 py-1.5 text-xs text-right font-semibold">Value</th>
+        <th className="px-2 py-1.5 text-xs text-left font-semibold">Units</th>
+        {showRef && <th className="px-2 py-1.5 text-xs text-right font-semibold" style={{ color: "#1B7A2B" }}>Motor-CAD</th>}
+      </tr></thead>
+      <tbody>{children}</tbody>
+    </table>
+  </div>
+);
+const TRow = ({ k, v, u, c }) => (   // ThermalTab 행
+  <div className="flex items-center justify-between px-2 py-1 text-xs" style={{ borderTop: "1px solid #22304d" }}>
+    <span style={{ color: "#7e8eac" }}>{k}</span>
+    <span style={{ fontFamily: "JetBrains Mono,Consolas,monospace", fontWeight: 600, color: c || "#e6edf7" }}>{v}{u && <span style={{ color: "#7e8eac", fontWeight: 400 }}> {u}</span>}</span>
+  </div>
+);
+const Btn = ({ v, label, ph, setPh, cols }) => (   // WindingLayout 상(phase) 토글
+  <button onClick={() => setPh(v)} className="text-xs px-2.5 py-1 rounded"
+    style={{ border: "1px solid #22304d", background: ph === v ? (v < 0 ? "#0c1424" : cols[v]) : "#0a1120", color: ph === v ? "#fff" : "#7e8eac", fontWeight: ph === v ? 600 : 400 }}>
+    {label}
+  </button>
 );
 // 입력 패널 박스 — 모듈 레벨 필수(내부 정의 시 매 렌더 새 타입→input 포커스 풀림). Panel 래퍼 사용.
 const Box = ({ title, children }) => (
@@ -1193,7 +1222,7 @@ export default function MiniMotorCad() {
     try {
       const r = compute(geo, wind, mat, calc, femmCal);
       return ["torque", "Rphase", "slotArea", "eff", "kw1", "Jrotor", "PF"].every((k) => isFinite(r[k])) ? r : null;
-    } catch (e) { return null; }
+    } catch { return null; }
   }, [geo, wind, mat, calc, femmCal]);
   const lastResRef = useRef(null);
   if (rawRes) lastResRef.current = rawRes;
@@ -1379,9 +1408,7 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
     ? geo.statorLamDia + 2 * (geo.airgap + (geo.bandingThickness || 0) + geo.magnetThickness + (geo.rotorYoke || 0))  // 외전형: 로터 캔 외경
     : geo.statorBore - 2 * geo.airgap;
   // DXF 형상 정합 자동검사 — 형상 관련 파라미터가 바뀔 때만 재계산.
-  const fit = useMemo(() => (dxf ? fitResidual(dxf, geo) : null),
-    [dxf, geo.statorBore, geo.slotDepth, geo.slotNumber, geo.toothWidth, geo.slotOpening, geo.toothTipDepth,
-     geo.toothTipAngle, geo.poleNumber, geo.magnetThickness, geo.magnetArcED, geo.magnetReduction, geo.airgap, geo.bandingThickness, geo.slotBottomShape]);
+  const fit = useMemo(() => (dxf ? fitResidual(dxf, geo) : null), [dxf, geo]);   // geo 전체 의존(누락 필드 stale 방지; DXF 로드시에만 계산)
 
   const w2s = (x, y, V) => [V.ox + x * V.scale, V.oy - y * V.scale];
   const s2w = (sx, sy, V) => [(sx - V.ox) / V.scale, (V.oy - sy) / V.scale];
@@ -1472,7 +1499,7 @@ function GeometryTab({ geo, sG, sW, res, resetGeo }) {
         ctx.beginPath(); ctx.moveTo(s1[0], s1[1]); ctx.lineTo(s2[0], s2[1]); ctx.stroke();
       }
     }
-  }, [geo, dxf, dxfT, layers, opacity, mPts, rotorDia]);
+  }, [geo, dxf, dxfT, layers, opacity, mPts]);
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -1826,8 +1853,8 @@ function SlotViewer({ geo, wind, res }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   // 외전형: 단면 상세는 공극면 반경의 내전형 등가 슬롯으로 표시(치수·도체패킹 동일, 검증된 경로 재사용)
-  const geoEff = geo.rotorType === "outer" ? { ...geo, statorBore: geo.statorLamDia, rotorType: "inner" } : geo;
-  const pack = useMemo(() => packConductors(geoEff, wind), [geo, wind]);
+  const geoEff = useMemo(() => geo.rotorType === "outer" ? { ...geo, statorBore: geo.statorLamDia, rotorType: "inner" } : geo, [geo]);  // 안정화(매 렌더 새 객체 방지)
+  const pack = useMemo(() => packConductors(geoEff, wind), [geoEff, wind]);
 
   const draw = useCallback(() => {
     const cv = canvasRef.current, wrap = wrapRef.current;
@@ -1870,7 +1897,6 @@ function SlotViewer({ geo, wind, res }) {
     poly(slot); ctx.fill();
     // 3) 권선영역(밝은 녹색): 라이너 안쪽
     const g2 = pack.geo;
-    const u = [Math.cos(dlt), Math.sin(dlt)];
     const wl = g2.wallLim;
     const tAtXmin = (g2.xMin - Math.sin(dlt) * wl) / Math.cos(dlt);
     const W1 = [g2.xMin, tAtXmin * Math.sin(dlt) - Math.cos(dlt) * wl];
@@ -1913,7 +1939,7 @@ function SlotViewer({ geo, wind, res }) {
     // 외곽선
     ctx.strokeStyle = "#c25555"; ctx.lineWidth = 1;
     poly(slot); ctx.stroke();
-  }, [geo, wind, pack]);
+  }, [geoEff, wind, pack]);
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -2100,9 +2126,6 @@ function MaterialsTab({ mat, sM, res, showRef }) {
   const td = "px-2 py-1 text-xs";
   const tdr = td + " text-right";
   const mono = { fontFamily: "Consolas,monospace" };
-  const TR = ({ children, total }) => (
-    <tr style={{ borderTop: "1px solid #22304d", background: total ? "#0c1424" : undefined }}>{children}</tr>
-  );
   if (!res) return <div className="p-4 text-sm" style={{ color: UI.label }}>계산 불가 — 입력값 확인</div>;
   return (
     <div className="h-full overflow-auto p-3">
@@ -2369,19 +2392,6 @@ function OutputTab({ res, calc, showRef, solved }) {
   if (!res) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
   const f = (v, d = 3) => Number(v).toFixed(d);
   const SUBS = [["drive", "Drive"], ["emag", "E-Magnetics"], ["flux", "Flux Densities"], ["loss", "Losses"], ["wdg", "Winding"], ["matl", "Materials"]];
-  const Tbl = ({ children }) => (
-    <div className="rounded flex-1 min-w-80" style={{ background: "#101a30", border: "1px solid #22304d" }}>
-      <table className="w-full">
-        <thead><tr style={{ background: "#0c1424" }}>
-          <th className="px-2 py-1.5 text-xs text-left font-semibold">Variable</th>
-          <th className="px-2 py-1.5 text-xs text-right font-semibold">Value</th>
-          <th className="px-2 py-1.5 text-xs text-left font-semibold">Units</th>
-          {showRef && <th className="px-2 py-1.5 text-xs text-right font-semibold" style={{ color: "#1B7A2B" }}>Motor-CAD</th>}
-        </tr></thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
-  );
   const r = (label, val, unit, refv, hl) => (
     <Row key={label} label={label} value={val} unit={unit} refv={showRef ? refv : undefined} hl={hl} />
   );
@@ -2397,7 +2407,7 @@ function OutputTab({ res, calc, showRef, solved }) {
       </div>
       <div className="flex-1 overflow-auto p-3 flex gap-3 items-start flex-wrap" style={{ background: "#101a30", borderTop: "1px solid #22304d" }}>
         {sub === "drive" && (<>
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("DC Bus Voltage", f(calc.Vdc, 0), "Volts", 48, true)}
             {r("Phase Supply Voltage (rms)", f(res.VsupplyRms, 2), "Volts", 33.94)}
             {r("Phase Terminal Voltage (rms)", f(res.Vterm, 2), "Volts", 30.92)}
@@ -2411,7 +2421,7 @@ function OutputTab({ res, calc, showRef, solved }) {
             {r("Fundamental Frequency", f(res.fe, 1), "Hz", 426.7)}
             {r("Shaft Speed", f(calc.speed, 0), "rpm", 3200)}
           </Tbl>
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("D Axis Inductance (추정)", f(res.Ld, 4), "mH", 0.1289, true)}
             {r("Q Axis Inductance (추정)", f(res.Lq, 4), "mH", 0.1401)}
             {r("Torque Constant Kt (라인 peak)", f(res.KtLine, 4), "Nm/A", 0.108)}
@@ -2425,7 +2435,7 @@ function OutputTab({ res, calc, showRef, solved }) {
           </Tbl>
         </>)}
         {sub === "emag" && (<>
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("Average Torque", f(res.torque, 4), "Nm", 3.7965, true)}
             {r("Shaft Torque (손실 반영)", f(res.Tshaft, 4), "Nm", 3.7136)}
             {r("Electromagnetic Power", f(res.Pem, 1), "Watts", 1268.8)}
@@ -2435,7 +2445,7 @@ function OutputTab({ res, calc, showRef, solved }) {
             {r("System Efficiency", f(res.eff, 3), "%", 95.213)}
             {r("No Load Speed", f(res.noLoadSpeed, 0), "rpm", 3649)}
           </Tbl>
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("Torque per Rotor Volume", f(res.TRV, 3), "kNm/m³", 25.971, true)}
             {r("Rotor Inertia (추정)", res.Jrotor.toExponential(4), "kg.m²", "4.445E-4")}
             {r("Cogging Period", f(res.coggingPeriod, 2), "MDeg", 2.5)}
@@ -2447,7 +2457,7 @@ function OutputTab({ res, calc, showRef, solved }) {
             {r("ini_pos (무부하 기준)", f(res.iniPosNL, 2), "°mech")}
             {r("부하각 δL (전기자반작용)", f(res.loadAngle, 1), "°elec")}
           </Tbl>
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("Flux Linkage D (PM, 무부하)", f(res.lambda * 1000, 3), "mVs", 15.70, true)}
             {r("Flux Linkage D (on load)", f(res.lamD_load * 1000, 3), "mVs")}
             {r("Flux Linkage Q (on load)", f(res.lamQ_load * 1000, 3), "mVs")}
@@ -2458,7 +2468,7 @@ function OutputTab({ res, calc, showRef, solved }) {
           <div className="w-full text-xs px-1" style={{ color: "#7e8eac" }}>ini_pos = U상 <b>부하시 역기전력</b>(전기자반작용 포함)이 0(상승)에서 시작하는 회전자 위치. 무부하 상승영점에서 부하각 δL/pp 만큼 이동(현재 운전점 전류·진각 기준). 전기 1주기(360/pp={f(360 / res.pp, 1)}°mech)마다 반복.</div>
         </>)}
         {sub === "flux" && (
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("Magnet Br (온도보정, 사용값)", f(res.Br_used, 4), "Tesla", 1.225, true)}
             {r("Carter Coefficient", f(res.kc, 4), "")}
             {r("Airgap Flux Density (peak, OC)", f(res.Bgpk, 3), "Tesla", "1.174 (on load)")}
@@ -2468,7 +2478,7 @@ function OutputTab({ res, calc, showRef, solved }) {
           </Tbl>
         )}
         {sub === "loss" && (
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("Armature DC Copper Loss (on load)", f(res.Pcu, 2), "Watts", 32.34, true)}
             {r("AC 동손비 R_ac/R_dc (추정)", f(res.RacRdc, 4), "")}
             {r("AC 동손 추가분 (근접효과, 추정)", f(res.PcuAddl, 2), "Watts")}
@@ -2480,7 +2490,7 @@ function OutputTab({ res, calc, showRef, solved }) {
           </Tbl>
         )}
         {sub === "wdg" && (<>
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("Armature Conductor CSA", f(res.condCSA, 3), "mm²", 0.159, true)}
             {r("Armature Turn CSA", f(res.turnCSA, 3), "mm²", 2.704)}
             {r("Conductor Current Density (rms)", f(res.Jrms, 3), "A/mm²", 5.296)}
@@ -2491,7 +2501,7 @@ function OutputTab({ res, calc, showRef, solved }) {
             {r("Phase Resistance", f(res.Rphase * 1e3, 2), "mΩ", 52.58)}
             {r("Line-Line Resistance", f(res.RlineLine * 1e3, 2), "mΩ", 35.06)}
           </Tbl>
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("Conductors / Slot", f(res.condPerSlot, 0), "", 408, true)}
             {r("Slot Area", f(res.slotArea, 1), "mm²", 160.3)}
             {r("Winding Area (+Liner)", f(res.windingAreaLiner, 1), "mm²", 152.2)}
@@ -2514,7 +2524,7 @@ function OutputTab({ res, calc, showRef, solved }) {
           </Tbl>
         </>)}
         {sub === "matl" && (
-          <Tbl>
+          <Tbl showRef={showRef}>
             {r("Armature Conductor Resistivity (T)", (1.724e-8 * (1 + 0.003862 * (calc.Tcu - 20))).toExponential(3), "Ohm.m", "2.123E-8", true)}
             {r("Number of Laminations", f(res.numLam, 1), "", 139.5)}
             {r("Magnet Br (Used)", f(res.Br_used, 4), "Tesla", 1.225)}
@@ -2981,12 +2991,6 @@ function ThermalTab({ geo, wind, calc, res, therm, sT, solved }) {
   }, [geo, wind, calc, res, therm]);
   if (!solved) return <div className="p-6 text-sm" style={{ color: "#7e8eac" }}>Calculation 탭에서 <b>Solve E-Magnetic Model</b>을 누른 뒤 표시됩니다 (손실값 필요).</div>;
   if (!data) return <div className="p-4 text-sm">계산 불가 — 입력값 확인</div>;
-  const TRow = ({ k, v, u, c }) => (   // ThermalTab 전용 행(U1: 모듈 Row 섀도잉 제거 위해 개명)
-    <div className="flex items-center justify-between px-2 py-1 text-xs" style={{ borderTop: "1px solid #22304d" }}>
-      <span style={{ color: "#7e8eac" }}>{k}</span>
-      <span style={{ fontFamily: "JetBrains Mono,Consolas,monospace", fontWeight: 600, color: c || "#e6edf7" }}>{v}{u && <span style={{ color: "#7e8eac", fontWeight: 400 }}> {u}</span>}</span>
-    </div>
-  );
   const setCool = (t) => { sT("coolType", t); sT("hConv", COOL_H[t]); };
   // 하우징 축단면 열지도 (부품 온도로 색칠) — 치수 시각화 + 미니 thermal map
   const Rh = data.Dh / 2, Rsl = geo.statorLamDia / 2, Rb = geo.statorBore / 2;
@@ -3165,17 +3169,11 @@ function WindingLayout({ geo, res }) {
     }
   });
 
-  const Btn = ({ v, label }) => (
-    <button onClick={() => setPh(v)} className="text-xs px-2.5 py-1 rounded"
-      style={{ border: "1px solid #22304d", background: ph === v ? (v < 0 ? "#0c1424" : cols[v]) : "#0a1120", color: ph === v ? "#fff" : "#7e8eac", fontWeight: ph === v ? 600 : 400 }}>
-      {label}
-    </button>
-  );
   return (
     <div className="flex-1 flex flex-col min-w-0">
       <div className="flex items-center gap-1.5 px-3 py-1.5" style={{ borderBottom: "1px solid #22304d" }}>
         <span className="text-xs font-semibold mr-1" style={{ color: "#c4d0e4" }}>상 표시:</span>
-        <Btn v={-1} label="전체" /><Btn v={0} label="Ph1" /><Btn v={1} label="Ph2" /><Btn v={2} label="Ph3" />
+        <Btn ph={ph} setPh={setPh} cols={cols} v={-1} label="전체" /><Btn ph={ph} setPh={setPh} cols={cols} v={0} label="Ph1" /><Btn ph={ph} setPh={setPh} cols={cols} v={1} label="Ph2" /><Btn ph={ph} setPh={setPh} cols={cols} v={2} label="Ph3" />
         <div className="flex-1" />
         <span className="text-xs" style={{ color: "#7e8eac" }}>× 들어감 · • 나옴 · 실선=엔드턴 · U1/V1/W1=In(상 시작) · U2/V2/W2=Out(상 끝)</span>
       </div>
