@@ -181,3 +181,18 @@
 - Kt 규약 함정 재확인: app Kt=T/Irms, Motor-CAD Kt=T/Ipeak → Kt_rms=√2·Kt_peak.
   토크는 0.2% 일치하는데 Kt만 +42% 어긋나면 솔버버그가 아니라 전류규약 불일치.
   비교 전 동일 규약으로 환산(÷√2)해야 like-for-like. (메모리 motorcad-400w-video-verification)
+
+## 2026-06-21 — 전면 재점검 58건 처리 + 오프라인화 (자율 실행)
+
+- 검증 oracle가 못 잡는 변경은 독립 체크를 따로 만든다: P1 릴럭턴스 토크는 검증점(진각0°)서
+  Trel=0이라 verify_400w/1250W로는 회귀 검출 불가 → tools/_check_torque.mjs로 adv≠0서
+  운전점 토크==완전 dq식임을 독립 증명(err<1e-13). "검증 통과가 정합을 보장 안 하는" 사각 주의.
+- 과적합 방지 게이트: 사용자가 "다른 모터는 다른 결과가 나와야 한다"고 강조 → verify_aedt에
+  distinctness(11모터 λ 고유·CV>15%)+타당성 경계 게이트 추가(exit code). 400W/1250W 정확매칭은
+  유지하되 일반화를 자동 검증. [[outer-rotor-support]] 11개 .aedt(바탕화면 aedt파일/) 활용.
+- 서버 계약 변경은 소비자도 같이 고쳐야: femm_server ripT를 0.0→None(null)로 바꾸자 App.jsx
+  null.toFixed TypeError 회귀 → 독립 리뷰어가 포착. fmt()(비유한→"—") 일괄 가드로 해결.
+  교훈: 양단 계약을 한 번에. 자가승인 말고 별도 리뷰 패스(다른 컨텍스트) 필수.
+- 오프라인 배포: React 정적빌드(app/dist)를 Python http.server로 서빙(run_offline.py) = Node
+  불필요. dist를 .gitignore(루트 dist + app/.gitignore 둘 다)에서 해제해 저장소 포함. Windows
+  콘솔 한글/✓ 출력은 sys.stdout.reconfigure(utf-8) 필수(cp949 UnicodeEncodeError).
