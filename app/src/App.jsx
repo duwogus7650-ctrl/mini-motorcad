@@ -1227,6 +1227,8 @@ export default function MiniMotorCad() {
   const [showRef, setShowRef] = useState(true);
   // FEMM 보정: {lam, ke, source} — 적용 시 해석식 λ를 FEMM값으로 고정 → 모든 λ의존 결과가 FEMM 기반.
   const [femmCal, setFemmCal] = useState(null);
+  const fileRef = useRef(null);          // 프로젝트(.mmcad) 불러오기 파일입력
+  const skipFemmReset = useRef(false);   // 프로젝트 로드 시 파일의 femmCal 보존(아래 무효화 effect 1회 스킵)
 
   // 입력 도중(빈 칸→0 등) NaN/Infinity가 나오면 마지막 유효 결과를 유지
   const rawRes = useMemo(() => {
@@ -1244,7 +1246,10 @@ export default function MiniMotorCad() {
   const [solved, setSolved] = useState(false);
   useEffect(() => { setSolved(false); }, [geo, wind, mat, calc]);
   // 자기설계(형상·권선·재질)가 바뀌면 FEMM 보정은 무효 (운전점 calc 변경은 λ에 무관하므로 유지)
-  useEffect(() => { setFemmCal(null); }, [geo, wind, mat]);
+  useEffect(() => {
+    if (skipFemmReset.current) { skipFemmReset.current = false; return; }  // 로드 직후 1회: 파일의 femmCal 보존
+    setFemmCal(null);
+  }, [geo, wind, mat]);
 
   const sG = (k, v) => setGeo((p) => ({ ...p, [k]: v }));
   const sW = (k, v) => setWind((p) => ({ ...p, [k]: v }));
@@ -1257,6 +1262,41 @@ export default function MiniMotorCad() {
     const blob = new Blob([JSON.stringify(data, (k, v) => (k === "wa" ? undefined : v), 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = "motor_design.json"; a.click();
+  };
+  // ── 프로젝트 저장/열기 (.mmcad) — 형상·권선·재질·운전점·열·FEMM보정 전체를 한 파일에 ──
+  const saveProject = () => {
+    const proj = {
+      format: "mini-motorcad", version: 1,
+      savedAt: new Date().toISOString(), app: "Mini Motor-CAD",
+      geometry: geo, winding: wind, materials: mat, calculation: calc, thermal: therm,
+      femmCal: femmCal && Number.isFinite(femmCal.lam) ? femmCal : null,
+      // results: 불러올 때 입력에서 항상 재계산됨 — 외부확인/기록용 스냅샷(wa 함수는 제외)
+      results: res ? JSON.parse(JSON.stringify(res, (k, v) => (k === "wa" ? undefined : v))) : null,
+    };
+    const blob = new Blob([JSON.stringify(proj, (k, v) => (k === "wa" ? undefined : v), 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `mini-motorcad_${geo.slotNumber}S${geo.poleNumber}P.mmcad`;
+    a.click();
+  };
+  const loadProject = async (file) => {
+    if (!file) return;
+    try {
+      const obj = JSON.parse(await file.text());
+      const g = obj.geometry, w = obj.winding, m = obj.materials, c = obj.calculation;
+      if (!g || !w || !m || !c) { alert("올바른 mini-motorcad 파일이 아닙니다 — geometry/winding/materials/calculation 누락."); return; }
+      skipFemmReset.current = true;                       // setGeo/…로 인한 femmCal 자동무효화 1회 스킵
+      setGeo({ ...GEO0, ...g });                           // 기본값 위에 덮어써 누락키(버전차) 방어
+      setWind({ ...WIND0, ...w });
+      setMat({ ...MAT0, ...m });
+      setCalc({ ...CALC0, ...c });
+      setTherm({ ...THERM0, ...(obj.thermal || {}) });
+      setFemmCal(obj.femmCal && Number.isFinite(obj.femmCal.lam) ? obj.femmCal : null);
+      setSolved(false);
+    } catch (e) {
+      skipFemmReset.current = false;
+      alert("불러오기 실패: " + (e && e.message ? e.message : e));
+    }
   };
   const exportFemm = () => {
     if (!res) { alert("결과 없음 — 입력 확인"); return; }
@@ -1354,13 +1394,19 @@ export default function MiniMotorCad() {
             <input type="checkbox" checked={showRef} onChange={(e) => setShowRef(e.target.checked)} accentColor={UI.cyan} />
             Motor-CAD 참조값 표시
           </label>
-          {[["사양표 CSV", exportSpecCsv], ["T-N CSV", exportTNCsv], ["FEMM 스크립트", exportFemm]].map(([t, fn]) => (
+          {[["사양표 CSV", exportSpecCsv], ["T-N CSV", exportTNCsv], ["FEMM 스크립트", exportFemm], ["설계 JSON", exportAll]].map(([t, fn]) => (
             <button key={t} onClick={fn} className="text-xs px-3 py-1 rounded font-medium mb-1"
               style={{ border: `1px solid ${UI.border}`, color: UI.cyan, background: UI.inset }}>{t}</button>
           ))}
-          <button onClick={exportAll} className="text-xs px-3 py-1 rounded font-semibold mb-1"
+          <input ref={fileRef} type="file" accept=".mmcad,.json,application/json" style={{ display: "none" }}
+            onChange={(e) => { loadProject(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+          <button onClick={() => fileRef.current && fileRef.current.click()} className="text-xs px-3 py-1 rounded font-semibold mb-1"
+            style={{ background: UI.inset, color: UI.amber, border: `1px solid ${UI.amber}88` }}>
+            📂 프로젝트 열기
+          </button>
+          <button onClick={saveProject} className="text-xs px-3 py-1 rounded font-semibold mb-1"
             style={{ background: `linear-gradient(180deg,${UI.blue},#2456c8)`, color: "#fff", border: "1px solid #2456c8" }}>
-            설계 JSON 내보내기
+            💾 프로젝트 저장
           </button>
         </div>
         <div className="flex gap-1 px-4 pb-0">
