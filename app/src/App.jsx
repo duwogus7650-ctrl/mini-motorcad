@@ -1844,19 +1844,29 @@ function packConductors(geo, wind) {
     }
     return cells;
   };
-  const right = packSide(1), left = packSide(-1);
+  // 실제 권선은 슬롯 바닥(백아이언)에서 시작해 개구쪽으로 채워진다 → 깊은(큰 x) 도체부터 우선 채택.
+  // 따라서 부분충전 시 빈 공간이 개구(슬롯 입구)쪽에 남는다(공간 부족 시 마지막 턴이 개구쪽에 못 들어감).
+  const byDepth = (a, b) => b[0] - a[0];
+  const right = packSide(1).sort(byDepth), left = packSide(-1).sort(byDepth);
   // 권선영역(라이너 안쪽) 상단 모서리 — 렌더용. 직선바닥이면 치벽∩(바닥-라이너), 정점은 바닥선∩축.
   let WtopS = null, apexS = null;
+  // 코일 디바이더 깊은 끝을 슬롯 바닥 윤곽에 맞춰 자르기 위한 좌표(두꺼운 디바이더의 바닥 관통 방지).
+  let divApexX, divEdgeX;
   if (straight) {
     const blc = bc - liner * blen;                                   // +y 바닥선을 라이너만큼 안쪽 평행이동
     const yTop = (blc - bnx * (wallLim / sD)) / (bnx * cD / sD + bny); // 치벽(sD·x−cD·y=wallLim)과 교점
     WtopS = [(wallLim + cD * yTop) / sD, yTop];
     apexS = [blc / bnx, 0];                                          // 바닥선 ∩ x축(슬롯중심 바닥)
+    divApexX = apexS[0];                                             // 직선바닥: 중심(y=0)이 가장 깊음
+    divEdgeX = (blc - bny * divHalf) / bnx;                          // 바닥선 위 y=divHalf 지점(가장자리=얕음)
+  } else {
+    divApexX = RdL;                                                  // 동심호: 중심이 가장 깊음(반경 RdL)
+    divEdgeX = Math.sqrt(Math.max(RdL * RdL - divHalf * divHalf, 0)); // 호 위 y=divHalf 지점
   }
   return {
     left: left.slice(0, targetSide), right: right.slice(0, targetSide),
     capacity: Math.min(left.length, right.length), targetSide,
-    geo: { x1, Rd, RdL, xMin, dlt, wallLim, divHalf, straight, WtopS, apexS },
+    geo: { x1, Rd, RdL, xMin, dlt, wallLim, divHalf, straight, WtopS, apexS, divApexX, divEdgeX },
   };
 }
 
@@ -1931,10 +1941,13 @@ function SlotViewer({ geo, wind, res }) {
       poly([[xw0, halfOp + 0.35], [xw1, halfOp + 0.9], [xw1, -halfOp - 0.9], [xw0, -halfOp - 0.35]]);
       ctx.fill();
     }
-    // 5) 코일 디바이더(연회색 세로 막대) — 직선바닥이면 바닥정점까지
-    const divOut = (g2.straight && g2.apexS ? g2.apexS[0] : g2.RdL) - 0.2;
+    // 5) 코일 디바이더(연회색 막대) — 깊은 끝을 슬롯 바닥 윤곽에 맞춰 자름.
+    //    두꺼운 디바이더가 직선/호 바닥을 뚫지 않도록 중심(가장 깊음)→가장자리(얕음) 5각형으로.
+    const gMar = 0.2;
+    const apX = Math.max(g2.xMin, g2.divApexX - gMar);                 // 중심(y=0): 가장 깊은 지점
+    const edX = Math.max(g2.xMin, Math.min(g2.divEdgeX - gMar, apX));  // 가장자리(y=±divHalf): 바닥에 닿는 얕은 지점
     ctx.fillStyle = "#E8EEF2";
-    poly([[g2.xMin, g2.divHalf], [divOut, g2.divHalf], [divOut, -g2.divHalf], [g2.xMin, -g2.divHalf]]);
+    poly([[g2.xMin, g2.divHalf], [edX, g2.divHalf], [apX, 0], [edX, -g2.divHalf], [g2.xMin, -g2.divHalf]]);
     ctx.fill();
     // 6) 도선 원 (노랑 + 절연 링)
     const rW = wind.wireDia / 2, rC = wind.copperDia / 2;
@@ -2194,6 +2207,12 @@ function MaterialsTab({ mat, sM, res, showRef }) {
 }
 
 // ─── Calculation 탭 (Motor-CAD Drive 패널) ──────────────────────
+// 현재 형상이 1250W-jk 기준(보정계수 시드값이 캘리브레이션된 형상)과 같은지 — 다르면 시드값 미적용 경고.
+const SEED_GEO_KEYS = ["slotNumber", "poleNumber", "statorBore", "statorLamDia", "slotDepth",
+  "toothWidth", "magnetThickness", "magnetArcED", "airgap", "slotOpening", "toothTipDepth"];
+const isSeedBaseline = (geo) => SEED_GEO_KEYS.every((k) =>
+  Math.abs((geo[k] ?? 0) - (GEO0[k] ?? 0)) <= Math.max(1e-6, Math.abs(GEO0[k] ?? 0) * 0.02));
+
 function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmCal, setFemmCal }) {
   const [femmRes, setFemmRes] = useState(null);
   const [femmBusy, setFemmBusy] = useState(false);
@@ -2294,7 +2313,24 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
           <NumIn label="AC 동손 보정 cAC" value={calc.cAC} step={0.1} onChange={(v) => sC("cAC", v)} />
           <NumIn label="철손 보정 cFe (FEA/측정)" value={calc.cFe} step={0.05} onChange={(v) => sC("cFe", v)} />
           <NumIn label="기타 손실 [W]" value={calc.otherLoss} step={0.5} onChange={(v) => sC("otherLoss", v)} />
-          <div className="px-2 py-1 text-xs" style={{ color: "#7e8eac" }}>기본값은 1250W-jk FEA 캘리브레이션. 토폴로지가 다르면 재조정.</div>
+          {femmCal ? (
+            <div className="px-2 py-1 text-xs" style={{ color: UI.green, lineHeight: 1.45 }}>
+              ✓ FEMM 자동보정 적용중 — 위 시드값 대신 이 형상에서 측정한 λ·Bt·By·kT·Ld/Lq·cFe를 사용합니다.
+              (수동 보정계수는 무시됨)
+            </div>
+          ) : isSeedBaseline(geo) ? (
+            <div className="px-2 py-1 text-xs" style={{ color: UI.label, lineHeight: 1.45 }}>
+              시드값 = 1250W-jk FEA 캘리브레이션 (현재 형상과 일치). 다른 모터로 바꾸면
+              <b style={{ color: "#c4d0e4" }}> ▶ FEMM 해석</b> 1회로 자동 재보정됩니다 — 수동 입력 불필요.
+            </div>
+          ) : (
+            <div className="px-2 py-1 text-xs" style={{ color: UI.amber, lineHeight: 1.45,
+              background: "rgba(245,165,36,0.10)", border: `1px solid ${UI.amber}55`, borderRadius: 4 }}>
+              ⚠ 형상이 1250W-jk 기준과 다릅니다 — 위 시드값은 이 모터에 보정돼 있지 않습니다.
+              <b style={{ color: "#ffd98a" }}> ▶ FEMM 해석</b>을 1회 실행하면 λ·Bt·By·kT·Ld/Lq·cFe가
+              이 형상에서 자동 측정·적용되어 시드값을 대체합니다. (직접 산정 불필요)
+            </div>
+          )}
         </Box>
       </div>
       {/* ── Col 3: Performance ── */}

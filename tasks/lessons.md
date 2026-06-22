@@ -196,3 +196,25 @@
 - 오프라인 배포: React 정적빌드(app/dist)를 Python http.server로 서빙(run_offline.py) = Node
   불필요. dist를 .gitignore(루트 dist + app/.gitignore 둘 다)에서 해제해 저장소 포함. Windows
   콘솔 한글/✓ 출력은 sys.stdout.reconfigure(utf-8) 필수(cp949 UnicodeEncodeError).
+
+## 2026-06-22 — 슬롯단면 디바이더 클립 + 권선 바닥기준 패킹 + 전류밀도/보정계수 정리
+
+- **직선(Maxwell) 슬롯바닥은 중심선이 가장 깊다**: 바닥은 톱니코너(A4)→슬롯중심정점(Rd,0)
+  직선이라 y=±divHalf 가장자리가 중심보다 얕다. 디바이더를 단순 사각형(apex−0.2까지)으로
+  그리면 두꺼울 때(coilDivider≥3, 실측 화면값) 바깥코너가 바닥선을 0.06mm+ 뚫는다. → 깊은 끝을
+  바닥윤곽에 맞춘 5각형(중심=apX, 가장자리=edX, edX≤apX)으로 클립. 호바닥도 동일 잠재버그라 같이
+  처리(divEdgeX=√(RdL²−divHalf²)). tools/verify_divider_clip.mjs: 4형상×2바닥×디바이더 10mm까지
+  maxOvershoot<0·좌표유한 확인. ay≤0(치>슬롯피치)은 변경 이전부터 무효형상이라 별도 분류.
+- **권선은 슬롯바닥부터 감긴다**: 패킹 셀을 깊이순(x 내림차)으로 정렬 후 slice → 부분충전 시
+  빈공간이 개구쪽에 남음(실제 기계권선). capacity=min(len) 정렬불변이라 수치/경고 무영향, 렌더
+  대상만 바뀜(독립 리뷰어 확인, over-full 케이스도 동일 적용=물리적으로 옳음).
+- **전류밀도 식 무변경**: Jrms는 나동선기준으로 Motor-CAD와 검증됨(1250W 5.296≈5.3). 새 모터
+  9.470 vs MC 8.65는 동선경 입력 1.05 vs 1.10 차이((1.1/1.05)²)이지 식버그 아님 → 입력정정. [[검증된
+  레퍼런스를 깨는 추정변경은 회귀]] 원칙 재확인. ([[current-density-convention]] 메모리에 규약화)
+- **보정계수 자동산정 = FEMM**: klk·cT·cLs·cFe 수동값은 1250W 시드일 뿐, ▶FEMM 해석이 형상에서
+  λ·Bt·By·kT·Ld/Lq·cFe를 측정·주입해 자동대체. UI에 3상태 안내 추가(FEMM적용=녹/기준일치=회/
+  형상상이+미보정=호박경고, isSeedBaseline로 GEO0와 11키 2% 비교).
+- **서브에이전트 API가 일시 불통일 수 있다**(FailedToOpenSocket/ConnectionRefused/timeout): 워크플로
+  3리뷰어 중 2개가 2회 연속 죽음. 무한 재시도 대신 메인루프에서 직접 인라인 검증(증거 스크립트)로
+  폴백. 교훈: 검증의 가치는 "독립 적대 점검"이지 "서브에이전트로 돌았다"가 아니다 — 경로가 죽으면
+  같은 모델이 직접 하되 증거(스크립트/빌드/린트)를 남긴다. 커버리지 누락은 침묵 말고 명시.
