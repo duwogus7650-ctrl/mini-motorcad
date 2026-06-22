@@ -1,4 +1,4 @@
-# Mini Motor-CAD — PMSM 기초설계 도구
+# YJHMOCAD — PMSM 기초설계 도구
 
 Ansys Motor-CAD의 기초설계 워크플로우(형상 → 권선 → 재질 → 구동조건 → 성능 출력)를
 웹 UI로 재현한 도구. DXF 단면을 깔고 파라미터를 매칭하는 것부터 성능 산출까지

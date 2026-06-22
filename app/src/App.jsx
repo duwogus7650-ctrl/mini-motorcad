@@ -1,7 +1,7 @@
 import { Component, useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ════════════════════════════════════════════════════════════════
-//  Mini Motor-CAD — PMSM 기초설계 도구
+//  YJHMOCAD — PMSM 기초설계 도구
 //  Geometry(DXF 매칭) / Winding / Materials / Calculation / Output
 //  해석 엔진: 1250W-jk Motor-CAD 결과로 검증됨
 // ════════════════════════════════════════════════════════════════
@@ -1070,7 +1070,7 @@ function femmLua(geo, wind, calc, res) {
   const rot = (pts, a) => { const c = Math.cos(a), s = Math.sin(a); return pts.map(([x, y]) => [x * c - y * s, x * s + y * c]); };
   const sp = buildSlotPath(geo), mp = buildMagnetPath(geo);
   const f = (v) => v.toFixed(3);
-  const L = ["-- Mini Motor-CAD → FEMM 자동생성 (2D 자기정적). FEMM에서 File>Open Lua Script로 실행.",
+  const L = ["-- YJHMOCAD → FEMM 자동생성 (2D 자기정적). FEMM에서 File>Open Lua Script로 실행.",
     "showconsole(); newdocument(0)",
     `mi_probdef(0,'millimeters','planar',1e-8,${depth.toFixed(2)},30)`,
     "mi_getmaterial('Air'); mi_getmaterial('M-19 Steel'); mi_getmaterial('Pure Iron')",
@@ -1104,7 +1104,7 @@ function femmLua(geo, wind, calc, res) {
       `mi_setblockprop('PM',1,0,'<None>',${magdir.toFixed(2)},1,0)`, "mi_clearselected()");
   }
   // 경계조건 + 해석
-  L.push(`mi_makeABC(7,${f(Rlam * 1.25)},0,0,0)`, "mi_zoomnatural()", "mi_saveas('mini_motorcad.fem')",
+  L.push(`mi_makeABC(7,${f(Rlam * 1.25)},0,0,0)`, "mi_zoomnatural()", "mi_saveas('YJHMOCAD.fem')",
     "mi_createmesh()", "mi_analyze(0)", "mi_loadsolution()",
     "-- 토크(회전자 group1, 가중응력텐서)", "mo_clearblock(); mo_groupselectblock(1)",
     "print('Torque [Nm] =', mo_blockintegral(22))", "mo_clearblock()",
@@ -1217,7 +1217,7 @@ function SelfCheckTab({ res, calc, femmCal, solved }) {
   );
 }
 
-export default function MiniMotorCad() {
+export default function Yjhmocad() {
   const [tab, setTab] = useState("geometry");
   const [geo, setGeo] = useState(GEO0);
   const [wind, setWind] = useState(WIND0);
@@ -1266,8 +1266,8 @@ export default function MiniMotorCad() {
   // ── 프로젝트 저장/열기 (.mmcad) — 형상·권선·재질·운전점·열·FEMM보정 전체를 한 파일에 ──
   const saveProject = () => {
     const proj = {
-      format: "mini-motorcad", version: 1,
-      savedAt: new Date().toISOString(), app: "Mini Motor-CAD",
+      format: "YJHMOCAD", version: 1,
+      savedAt: new Date().toISOString(), app: "YJHMOCAD",
       geometry: geo, winding: wind, materials: mat, calculation: calc, thermal: therm,
       femmCal: femmCal && Number.isFinite(femmCal.lam) ? femmCal : null,
       // results: 불러올 때 입력에서 항상 재계산됨 — 외부확인/기록용 스냅샷(wa 함수는 제외)
@@ -1276,7 +1276,7 @@ export default function MiniMotorCad() {
     const blob = new Blob([JSON.stringify(proj, (k, v) => (k === "wa" ? undefined : v), 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `mini-motorcad_${geo.slotNumber}S${geo.poleNumber}P.mmcad`;
+    a.download = `YJHMOCAD_${geo.slotNumber}S${geo.poleNumber}P.mmcad`;
     a.click();
   };
   const loadProject = async (file) => {
@@ -1284,7 +1284,7 @@ export default function MiniMotorCad() {
     try {
       const obj = JSON.parse(await file.text());
       const g = obj.geometry, w = obj.winding, m = obj.materials, c = obj.calculation;
-      if (!g || !w || !m || !c) { alert("올바른 mini-motorcad 파일이 아닙니다 — geometry/winding/materials/calculation 누락."); return; }
+      if (!g || !w || !m || !c) { alert("올바른 YJHMOCAD 파일이 아닙니다 — geometry/winding/materials/calculation 누락."); return; }
       skipFemmReset.current = true;                       // setGeo/…로 인한 femmCal 자동무효화 1회 스킵
       setGeo({ ...GEO0, ...g });                           // 기본값 위에 덮어써 누락키(버전차) 방어
       setWind({ ...WIND0, ...w });
@@ -1302,7 +1302,7 @@ export default function MiniMotorCad() {
     if (!res) { alert("결과 없음 — 입력 확인"); return; }
     const blob = new Blob([femmLua(geo, wind, calc, res)], { type: "text/plain" });
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = "mini_motorcad_femm.lua"; a.click();
+    a.href = URL.createObjectURL(blob); a.download = "YJHMOCAD_femm.lua"; a.click();
   };
   // CSV 다운로드 (UTF-8 BOM — Excel에서 한글/°·² 깨짐 방지)
   const downloadCsv = (name, text) => {
@@ -1384,7 +1384,7 @@ export default function MiniMotorCad() {
       <div style={{ background: UI.panel2, borderBottom: `1px solid ${UI.border}`, boxShadow: "0 2px 12px rgba(0,0,0,0.4)" }}>
         <div className="flex items-center gap-3 px-4 pt-2.5">
           <span style={{ fontFamily: UI.logo, fontWeight: 700, fontSize: 16, letterSpacing: "0.04em", color: UI.head }}>
-            MINI <span style={{ color: UI.cyan }}>MOTOR-CAD</span>
+            YJHMO<span style={{ color: UI.cyan }}>CAD</span>
           </span>
           <span className="text-xs" style={{ color: UI.faint, letterSpacing: "0.1em" }}>PMSM DESIGN</span>
           {femmCal && <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: "rgba(43,212,122,0.15)", color: UI.green, border: `1px solid ${UI.green}55` }}>● FEMM 보정됨 (λ={femmCal.lam.toFixed(4)})</span>}
@@ -2413,7 +2413,7 @@ function CalculationTab({ geo, calc, sC, wind, sW, res, solved, setSolved, femmC
         <div className="rounded mt-1.5 p-2 text-xs" style={{ background: "#0a1120", border: "1px solid #22304d", color: "#7e8eac", lineHeight: 1.6 }}>
           <div style={{ color: "#34d3e8", fontWeight: 600, marginBottom: 3 }}>▶ FEMM 해석 전, 브릿지 서버를 먼저 켜세요</div>
           <div>1. 터미널(명령 프롬프트)에서 프로젝트 폴더로 이동:</div>
-          <div style={{ fontFamily: "JetBrains Mono,Consolas,monospace", color: "#cfe0ff", background: "#0c1424", padding: "2px 6px", borderRadius: 4, margin: "2px 0" }}>cd C:\\Users\\user\\Desktop\\mini-motorcad-main</div>
+          <div style={{ fontFamily: "JetBrains Mono,Consolas,monospace", color: "#cfe0ff", background: "#0c1424", padding: "2px 6px", borderRadius: 4, margin: "2px 0" }}>cd C:\\Users\\user\\Desktop\\YJHMOCAD</div>
           <div>2. 브릿지 서버 실행 (FEMM·pyfemm 설치 필요):</div>
           <div style={{ fontFamily: "JetBrains Mono,Consolas,monospace", color: "#cfe0ff", background: "#0c1424", padding: "2px 6px", borderRadius: 4, margin: "2px 0" }}>python fea\\femm_server.py</div>
           <div>3. <span style={{ color: "#2bd47a" }}>http://localhost:8765 대기</span> 뜨면 위 버튼 클릭. 코드 수정 시 서버 <b style={{ color: "#f5a524" }}>재시작(Ctrl+C → 재실행)</b>.</div>

@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
-title Mini Motor-CAD (오프라인 · Python)
+title YJHMOCAD (오프라인 · Python)
 cd /d "%~dp0"
 
 echo ============================================
-echo   Mini Motor-CAD - 오프라인 실행 (Python)
+echo   YJHMOCAD - 오프라인 실행 (Python)
 echo   Node.js 불필요 · 더블클릭으로 실행
 echo ============================================
 echo.

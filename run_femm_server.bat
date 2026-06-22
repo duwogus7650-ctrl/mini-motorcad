@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
-title Mini Motor-CAD - FEMM Bridge
+title YJHMOCAD - FEMM Bridge
 cd /d "%~dp0"
 
 echo ============================================
-echo   Mini Motor-CAD - FEMM 브릿지 서버
+echo   YJHMOCAD - FEMM 브릿지 서버
 echo ============================================
 echo.
 

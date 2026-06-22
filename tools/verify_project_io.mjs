@@ -11,7 +11,7 @@ const THERM0 = { ambient: 40, flow: 0 };
 
 // saveProject 직렬화(브라우저 new Date()만 고정 대체)
 const saveProject = (geo, wind, mat, calc, therm, femmCal, res) => JSON.stringify({
-  format: "mini-motorcad", version: 1, savedAt: "2026-06-22T00:00:00.000Z", app: "Mini Motor-CAD",
+  format: "YJHMOCAD", version: 1, savedAt: "2026-06-22T00:00:00.000Z", app: "YJHMOCAD",
   geometry: geo, winding: wind, materials: mat, calculation: calc, thermal: therm,
   femmCal: femmCal && Number.isFinite(femmCal.lam) ? femmCal : null,
   results: res ? JSON.parse(JSON.stringify(res, (k, v) => (k === "wa" ? undefined : v))) : null,
@@ -49,7 +49,7 @@ ok("FEMM 보정 보존(λ 유효)", r1.femmCal && r1.femmCal.lam === 0.0142 && r
 ok("results 스냅샷의 wa 함수 직렬화 제외", JSON.parse(saveProject(geo, wind, mat, calc, therm, femmCal, res)).results.wa === undefined);
 
 // 2) 부분 파일(구버전·키 누락) → 기본값으로 채움
-const partial = JSON.stringify({ format: "mini-motorcad", geometry: { slotNumber: 24 }, winding: { turnsPerCoil: 5 }, materials: {}, calculation: { speed: 1000 } });
+const partial = JSON.stringify({ format: "YJHMOCAD", geometry: { slotNumber: 24 }, winding: { turnsPerCoil: 5 }, materials: {}, calculation: { speed: 1000 } });
 const r2 = loadProject(partial);
 ok("누락 형상키 기본값 보강", r2.geo.slotNumber === 24 && r2.geo.statorBore === GEO0.statorBore && r2.geo.rotorType === "inner");
 ok("누락 thermal → THERM0", r2.therm.ambient === THERM0.ambient);

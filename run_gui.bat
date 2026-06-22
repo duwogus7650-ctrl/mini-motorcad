@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
-title Mini Motor-CAD
+title YJHMOCAD
 cd /d "%~dp0"
 
 echo ============================================
-echo   Mini Motor-CAD - PMSM 기초설계 도구
+echo   YJHMOCAD - PMSM 기초설계 도구
 echo ============================================
 echo.
 
@@ -36,7 +36,7 @@ if not errorlevel 1 (
     echo [안내] Python 미설치 - FEMM 해석 비활성 ^(웹앱은 정상^).
   ) else (
     echo [FEMM] 브릿지 서버를 새 창에서 시작합니다 ^(FEMM 4.2 + pyfemm 설치 시 동작^).
-    start "Mini Motor-CAD - FEMM Bridge" cmd /k "chcp 65001 >nul & python fea\femm_server.py"
+    start "YJHMOCAD - FEMM Bridge" cmd /k "chcp 65001 >nul & python fea\femm_server.py"
   )
 )
 echo.

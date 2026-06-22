@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Mini Motor-CAD ↔ FEMM 브릿지 서버
+YJHMOCAD ↔ FEMM 브릿지 서버
 웹앱이 보낸 설계로 FEMM(pyfemm) 2D FEA를 자동 실행하고 성능을 반환한다.
 
 설치:
@@ -138,7 +138,7 @@ def build(d):
     if polePitch - 2 * magHalfDeg <= 1e-3:
         raise ValueError('자석 호각이 폴피치보다 큼 (magnetArcED 과대) — 형상 불가')
 
-    femm.openfemm(1)            # 1 = 창 숨김 (모델은 mini_motorcad.fem 로 저장됨)
+    femm.openfemm(1)            # 1 = 창 숨김 (모델은 YJHMOCAD.fem 로 저장됨)
     femm.newdocument(0)
     # 스마트메시 OFF — 켜져 있으면 블록별 메시 크기를 무시하고 에어갭/코너를 자동 미세화해
     # 노드가 20만으로 폭증한다. 끄면 아래 블록 크기(형상 비례)가 그대로 적용됨.
@@ -214,7 +214,7 @@ def build(d):
     femm.mi_makeABC(5, Rbound * 1.25, 0, 0, 0)
     label(Rbound * 1.12 * math.cos(0.06), Rbound * 1.12 * math.sin(0.06), 'Air', 0, 0, mExt)  # 외부 공기(비축)
     femm.mi_zoomnatural()
-    femm.mi_saveas('mini_motorcad.fem')
+    femm.mi_saveas('YJHMOCAD.fem')
 
 
 def set_currents(d, ia, ib, ic):
@@ -555,5 +555,5 @@ def ping():
 
 
 if __name__ == '__main__':
-    print('Mini Motor-CAD ↔ FEMM 브릿지: http://localhost:8765  (Ctrl+C 종료)')
+    print('YJHMOCAD ↔ FEMM 브릿지: http://localhost:8765  (Ctrl+C 종료)')
     app.run(host='127.0.0.1', port=8765, threaded=True)

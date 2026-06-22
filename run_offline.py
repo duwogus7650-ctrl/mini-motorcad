@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-mini-motorcad 오프라인 실행기 (Node.js 불필요).
+YJHMOCAD 오프라인 실행기 (Node.js 불필요).
 
 빌드된 정적 프런트엔드(app/dist/)를 파이썬 표준 라이브러리만으로 로컬 서빙하고
 브라우저를 띄운다. geometry/compute/권선 시각화/효율맵/열해석 등 핵심 기능은
@@ -37,7 +37,7 @@ DIST = ROOT / "app" / "dist"
 
 
 def main():
-    ap = argparse.ArgumentParser(description="mini-motorcad 오프라인 실행기")
+    ap = argparse.ArgumentParser(description="YJHMOCAD 오프라인 실행기")
     ap.add_argument("--port", type=int, default=5173, help="HTTP 포트 (기본 5173)")
     ap.add_argument("--femm", action="store_true", help="FEMM FEA 서버도 실행 (FEMM+pyfemm 필요)")
     ap.add_argument("--no-browser", action="store_true", help="브라우저 자동 열기 끔")
@@ -69,7 +69,7 @@ def main():
         sys.exit(1)
 
     url = f"http://127.0.0.1:{args.port}/"
-    print(f"\n✓ mini-motorcad 실행 중 → {url}")
+    print(f"\n✓ YJHMOCAD 실행 중 → {url}")
     if args.femm:
         print("  FEMM 서버: http://127.0.0.1:8765  (앱의 FEMM 검증 버튼에서 사용)")
     print("  종료: Ctrl+C\n")

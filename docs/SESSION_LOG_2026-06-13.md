@@ -6,7 +6,7 @@
 ## 0. 이 프로젝트의 목표 (가장 중요)
 
 사용자는 Ansys Motor-CAD 사용이 아직 서툴러서, **Motor-CAD와 거의 동일하게 동작하되
-자기 입맛대로 조금씩 수정해 갈 수 있는** 프로그램(mini-motorcad)을 만드는 것이 목표.
+자기 입맛대로 조금씩 수정해 갈 수 있는** 프로그램(YJHMOCAD)을 만드는 것이 목표.
 
 **핵심 기능 (사용자가 "꼭 필요해"라고 명시):**
 권선 스펙(나동선 지름, 인슐레이터/라이너 두께, 턴수, 가닥수 등)을 화면에서 **실시간으로
@@ -69,7 +69,7 @@
 
 ## 6. 실행 방법 (요약)
 ```
-cd c:\Users\user\Desktop\mini-motorcad-main\app
+cd c:\Users\user\Desktop\YJHMOCAD\app
 npm install   # 최초 1회 또는 새 PC
 npm run dev   # http://localhost:5173
 ```

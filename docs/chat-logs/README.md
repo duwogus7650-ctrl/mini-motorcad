@@ -1,6 +1,6 @@
 # 채팅기록 (작업 대화 로그)
 
-mini-motorcad 개발 과정의 Claude Code 세션 대화 기록입니다. 원본 트랜스크립트(.jsonl)에서
+YJHMOCAD 개발 과정의 Claude Code 세션 대화 기록입니다. 원본 트랜스크립트(.jsonl)에서
 `tools/export_chatlog.py` 로 생성했으며, base64 이미지·시스템 메시지는 제외하고 추론·도구결과는 요약했습니다.
 
 | 날짜 | 파일 | 주요 내용 |

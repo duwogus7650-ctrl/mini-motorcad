@@ -7,7 +7,7 @@ base64 이미지·시스템 주입 제거, 도구호출 요약, 추론(thinking)
 import json, glob, os
 
 SRC = os.path.expanduser(
-    r"~/.claude/projects/c--Users-user-Desktop-mini-motorcad-main")
+    r"~/.claude/projects/c--Users-user-Desktop-YJHMOCAD")
 OUT = "docs/chat-logs"
 os.makedirs(OUT, exist_ok=True)
 
@@ -103,7 +103,7 @@ def main():
             continue
         fn = f"{OUT}/{date}_{sid}.md"
         hdr = (f"# 채팅기록 — {date} (세션 {sid})\n\n"
-               "_mini-motorcad 작업 대화 로그. base64 이미지·시스템 메시지 제외, "
+               "_YJHMOCAD 작업 대화 로그. base64 이미지·시스템 메시지 제외, "
                "추론·도구결과는 요약. 원본 .jsonl 에서 tools/export_chatlog.py 로 재생성._\n")
         open(fn, "w", encoding="utf-8").write(hdr + "\n".join(md))
         print(f"{fn}  ({len(md)} 블록, {os.path.getsize(fn)//1024} KB)")
